@@ -1,0 +1,19 @@
+meta {
+  name: Scan
+  type: http
+  seq: 2
+}
+
+post {
+  url: http://localhost:8080/scan
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "inputSource": "Feeder",
+    "session": "80d925af-c563-4de0-9e17-43b5d3fa605a",
+    "duplex": true
+  }
+}

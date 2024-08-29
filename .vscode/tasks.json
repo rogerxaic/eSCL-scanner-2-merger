@@ -4,18 +4,33 @@
   "version": "2.0.0",
   "tasks": [
     {
-        "label": "Docker build dev",
-        "type": "shell",
-        "command": "docker build . -t go-scanner:dev",
-        "group": {
-            "kind": "build",
-            "isDefault": true
-        },
-        "presentation": {
-            "reveal": "always",
-            "panel": "new"
-        },
-        "problemMatcher": []
+      "label": "Docker build dev",
+      "type": "shell",
+      "command": "docker build . -t go-scanner:dev",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Docker run dev",
+      "type": "shell",
+      "command": "docker run -it --rm -p 8080:8080 --mount type=volume,source=scanner-data,target=/scans/ go-scanner:dev -host=1.2.3.4 -dataDir=/scans",
+      "group": {
+        "kind": "none",
+        "isDefault": true
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": [],
+      "dependsOn": ["Docker build dev"]
     }
-]
+  ]
 }

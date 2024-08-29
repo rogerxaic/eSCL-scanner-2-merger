@@ -1,18 +1,27 @@
 FROM golang:1.23-alpine AS builder
 
-RUN apk add --no-cache git
-
 WORKDIR /app
 
-COPY . .
+COPY go.mod go.sum ./
 
-RUN go build -o main .
+RUN go mod download
+
+COPY scanner-server.go scanner-server.go
+
+RUN go build -o scanner .
 
 # # # # # # # # # # # # # 
 # # # # # # # # # # # # # 
 
-FROM minidocks/pdftk
+FROM ubuntu:24.04
 
-COPY --from=builder /app/main /usr/bin/main
+RUN apt update && \
+    apt install -y pdftk && \
+    apt clean && \
+    apt autoremove -y
 
-ENTRYPOINT ["main"]
+COPY --from=builder /app/scanner /usr/bin/scanner
+
+VOLUME /scans
+
+ENTRYPOINT ["scanner"]
