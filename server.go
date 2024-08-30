@@ -15,12 +15,6 @@ import (
 	"github.com/stapelberg/airscan"
 )
 
-type ScanRequest struct {
-	InputSource string `json:"inputSource"`
-	Duplex      bool   `json:"duplex"`
-	Session     string `json:"session"`
-}
-
 var globalConfig *Config
 
 func main() {

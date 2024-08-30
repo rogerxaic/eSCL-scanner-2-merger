@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/base64"
+	"fmt"
 	"log"
 	"os"
 	"time"
@@ -9,11 +10,6 @@ import (
 	"github.com/sendgrid/sendgrid-go"
 	"github.com/sendgrid/sendgrid-go/helpers/mail"
 )
-
-type Email struct {
-	Name    string
-	Address string
-}
 
 func getClient() *sendgrid.Client {
 	apiKey := os.Getenv("SENDGRID_API_KEY")
@@ -44,14 +40,14 @@ func SendEmail(tos []*mail.Email, file string) bool {
 		return false
 	}
 
+	now := time.Now()
+	fileName := now.Local().Format("2006.01.02-15.04") + "-scan.pdf"
+
 	m := mail.NewV3Mail()
 	m.SetFrom(mail.NewEmail("Scan", "scanner@example.com"))
 	m.Subject = "Scan"
-	c := mail.NewContent("text/plain", "scanned file")
+	c := mail.NewContent("text/plain", fmt.Sprintf("Scanned file on %s. Please find the attached file '%s'.", now.Local().Format("2 Jan 2006 at 15:04"), fileName))
 	m.AddContent(c)
-
-	// c = mail.NewContent("text/html", "s")
-	// m.AddContent(c)
 
 	p := mail.NewPersonalization()
 	p.AddTos(tos...)
@@ -61,7 +57,7 @@ func SendEmail(tos []*mail.Email, file string) bool {
 	encoded := base64.StdEncoding.EncodeToString(fileContent)
 	a.SetContent(encoded)
 	a.SetType("application/pdf")
-	a.SetFilename(time.Now().Format("2006.01.02-15.04") + "-scan.pdf")
+	a.SetFilename(fileName)
 	a.SetDisposition("attachment")
 	m.AddAttachment(a)
 

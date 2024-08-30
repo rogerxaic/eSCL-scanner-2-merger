@@ -14,18 +14,10 @@ import (
 	"github.com/stapelberg/airscan/preset"
 )
 
-type InputSource string
-
 const (
 	Platen InputSource = "Platen"
 	Feeder InputSource = "Feeder"
 )
-
-type Config struct {
-	Host    string
-	DataDir string
-	Airscan *airscan.Client
-}
 
 func SetupScanner() (*Config, error) {
 	var host string
