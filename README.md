@@ -20,3 +20,9 @@ docker run -it --rm -p 8080:8080 --mount type=volume,source=scanner-data,target=
 ```bash
 docker run -it --rm -p 8080:8080 --mount type=volume,source=scanner-data,target=/scans/ -w /scans --entrypoint=pdftk go-scanner:dev A=recto.pdf B=verso.pdf shuffle A Bend-1 output merged.pdf
 ```
+
+## Deploying
+
+```bash
+tsh scp -r . pi@target:/home/pi/eSCL-scanner-2-merger/go-scanner
+```

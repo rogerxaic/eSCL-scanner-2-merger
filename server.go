@@ -86,9 +86,17 @@ func handleScan(cfg *Config) gin.HandlerFunc {
 			file := filepath.Join(cfg.DataDir, session, "scanned.pdf")
 			tos := []*mail.Email{mail.NewEmail("Roger", "owner@example.com")}
 			emailStatus := SendEmail(tos, file)
+			err := PostToPaperless("https://papers-a.example.com", file)
+			var paperlessStatus string
+			if err != nil {
+				paperlessStatus = "error"
+			} else {
+				paperlessStatus = "success"
+			}
 			c.JSON(http.StatusOK, gin.H{
-				"link":        fmt.Sprintf("http://%s/scanned/%s/scanned.pdf", c.Request.Host, session),
-				"emailStatus": emailStatus,
+				"link":            fmt.Sprintf("http://%s/scanned/%s/scanned.pdf", c.Request.Host, session),
+				"emailStatus":     emailStatus,
+				"paperlessStatus": paperlessStatus,
 			})
 		}
 	}
