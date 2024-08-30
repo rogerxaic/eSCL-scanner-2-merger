@@ -1,0 +1,23 @@
+meta {
+  name: Scan double - part 1
+  type: http
+  seq: 3
+}
+
+post {
+  url: http://{{host}}/scan
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "inputSource": "Platen",
+    "duplex": true
+  }  
+}
+
+tests {
+  let data = res.getBody();
+  bru.setVar("session", data.session);
+}

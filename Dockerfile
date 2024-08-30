@@ -6,7 +6,7 @@ COPY go.mod go.sum ./
 
 RUN go mod download
 
-COPY scanner-server.go scanner-server.go
+COPY *.go ./
 
 RUN go build -o scanner .
 

@@ -1,0 +1,18 @@
+meta {
+  name: Scan simple
+  type: http
+  seq: 2
+}
+
+post {
+  url: http://{{host}}/scan
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "inputSource": "Platen",
+    "duplex": false
+  }
+}

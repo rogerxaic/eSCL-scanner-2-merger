@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/renameio/v2"
 	"github.com/google/uuid"
+	"github.com/sendgrid/sendgrid-go/helpers/mail"
 	"github.com/stapelberg/airscan"
 	"github.com/stapelberg/airscan/preset"
 )
@@ -58,11 +60,11 @@ func getSettings(inputSource InputSource) *airscan.ScanSettings {
 	return settings
 }
 
-func scan(cfg *Config, settings *airscan.ScanSettings, c *gin.Context, session string, filename string) error {
+func scan(cfg *Config, settings *airscan.ScanSettings, session string, filename string) error {
 	scan, err := cfg.Airscan.Scan(settings)
 	if err != nil {
 		log.Print(err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		// c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return err
 	}
 	defer scan.Close()
@@ -70,8 +72,9 @@ func scan(cfg *Config, settings *airscan.ScanSettings, c *gin.Context, session s
 	if _, err := os.Stat(sessionDir); os.IsNotExist(err) {
 		if err := os.MkdirAll(sessionDir, 0755); err != nil {
 			log.Printf("error creating session directory: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create session directory"})
-			return err
+			// c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create session directory"})
+			// return err
+			return errors.New("Failed to create session directory")
 		}
 	}
 
@@ -82,36 +85,36 @@ func scan(cfg *Config, settings *airscan.ScanSettings, c *gin.Context, session s
 		o, err := renameio.TempFile("", fn)
 		if err != nil {
 			log.Printf("error: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return err
+			// c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return errors.New("Failed to create temp file")
 		}
 		defer o.Cleanup()
 
 		if _, err := io.Copy(o, scan.CurrentPage()); err != nil {
 			log.Printf("error: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return err
+			// c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return errors.New("Failed to copy page to temp file")
 		}
 
 		size, err := o.Seek(0, io.SeekCurrent)
 		if err != nil {
 			log.Printf("error: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			// c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return err
 		}
 
 		if err := o.CloseAtomicallyReplace(); err != nil {
 			log.Printf("error: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return err
+			// c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return errors.New("Failed to close temp file")
 		}
 
 		log.Printf("wrote %s (%d bytes)", fn, size)
 	}
 	if err := scan.Err(); err != nil {
 		log.Printf("error: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return err
+		// c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return errors.New("Failed to scan page")
 	}
 
 	return nil
@@ -143,16 +146,19 @@ func main() {
 			return
 		}
 
-		log.Printf("scanning with input source: %s", req.InputSource)
-		log.Printf("scanning with duplex: %t", req.Duplex)
+		var scanType string
+		if req.Duplex {
+			scanType = "recto/verso"
+		} else {
+			scanType = "only recto"
+		}
+		log.Printf("scanning %s from %s", scanType, req.InputSource)
 
 		inputSource := InputSource(req.InputSource)
 		if inputSource != Platen && inputSource != Feeder {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input source. Please use 'Platen' or 'Feeder'."})
 			return
 		}
-		// c.JSON(http.StatusOK, gin.H{"message": "debug"})
-		// return
 
 		settings := getSettings(inputSource)
 
@@ -160,23 +166,40 @@ func main() {
 		if req.Duplex {
 			if req.Session == "" {
 				session = uuid.NewString()
-				scan(cfg, settings, c, session, "recto")
+				err := scan(cfg, settings, session, "recto")
+				if err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+					return
+				}
 				c.JSON(http.StatusOK, gin.H{"session": session})
 				return
 
 			} else {
 				session = req.Session
-				scan(cfg, settings, c, session, "verso")
-				// merge both pdfs into one
+				err := scan(cfg, settings, session, "verso")
+				if err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+					return
+				}
 				merge(cfg.DataDir, session)
-				c.JSON(http.StatusOK, gin.H{"link": fmt.Sprintf("http://%s/scanned/%s/scanned.pdf", c.Request.Host, session)})
+				file := filepath.Join(cfg.DataDir, session, "scanned.pdf")
+				tos := []*mail.Email{mail.NewEmail("Roger", "owner@example.com")}
+				emailStatus := SendEmail(tos, file)
+				c.JSON(http.StatusOK, gin.H{"link": fmt.Sprintf("http://%s/scanned/%s/scanned.pdf", c.Request.Host, session), "emailStatus": emailStatus})
 				return
 			}
 		} else {
 			session = uuid.NewString()
-			scan(cfg, settings, c, session, "scanned")
+			err := scan(cfg, settings, session, "scanned")
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			file := filepath.Join(cfg.DataDir, session, "scanned.pdf")
+			tos := []*mail.Email{mail.NewEmail("Roger", "owner@example.com")}
+			emailStatus := SendEmail(tos, file)
 			// return a link to the scanned file
-			c.JSON(http.StatusOK, gin.H{"link": fmt.Sprintf("http://%s/scanned/%s/scanned.pdf", c.Request.Host, session)})
+			c.JSON(http.StatusOK, gin.H{"link": fmt.Sprintf("http://%s/scanned/%s/scanned.pdf", c.Request.Host, session), "emailStatus": emailStatus})
 			return
 		}
 
