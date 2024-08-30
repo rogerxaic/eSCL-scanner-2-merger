@@ -25,6 +25,13 @@ func getClient() *sendgrid.Client {
 	return sendgrid.NewSendClient(apiKey)
 }
 
+func SetupEmail() {
+	apiKey := os.Getenv("SENDGRID_API_KEY")
+	if apiKey == "" {
+		log.Fatal("SENDGRID_API_KEY is not set")
+	}
+}
+
 func SendEmail(tos []*mail.Email, file string) bool {
 	fileContent, err := os.ReadFile(file)
 	if err != nil {

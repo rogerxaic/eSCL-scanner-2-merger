@@ -3,7 +3,7 @@
 ## Development
 
 ```bash
-npx nodemon --watch '*.go' --ext go --signal SIGTERM --exec 'go run scanner-server.go' -host=1.2.3.4 -dataDir=/tmp
+npx nodemon --watch '*.go' --ext go --signal SIGTERM --exec 'go run *.go' -host=1.2.3.4 -dataDir=/tmp
 ```
 
 ## Production
