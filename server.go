@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/robfig/cron/v3"
 	"github.com/sendgrid/sendgrid-go/helpers/mail"
 	"github.com/stapelberg/airscan"
 )
@@ -20,15 +21,26 @@ type ScanRequest struct {
 	Session     string `json:"session"`
 }
 
+var globalConfig *Config
+
 func main() {
 	SetupEmail()
-	cfg, err := SetupScanner()
+	var err error
+	globalConfig, err = SetupScanner()
 	if err != nil {
 		log.Fatalf("error: %v", err)
 	}
 
+	// Set up cron job
+	c := cron.New()
+	_, err = c.AddFunc("0 2 * * *", dailyTask) // Run every day at 2:00 AM
+	if err != nil {
+		log.Fatalf("error setting up cron job: %v", err)
+	}
+	c.Start()
+
 	r := gin.Default()
-	setupRoutes(r, cfg)
+	setupRoutes(r, globalConfig)
 	r.Run()
 	log.Printf("Server started on http://0.0.0.0:8080")
 }
@@ -37,6 +49,12 @@ func setupRoutes(r *gin.Engine, cfg *Config) {
 	r.GET("/ping", handlePing)
 	r.POST("/scan", handleScan(cfg))
 	r.GET("/scanned/:session/:file", handleScannedFile(cfg))
+	r.GET("/cleanup", handleCleanup)
+}
+
+func handleCleanup(c *gin.Context) {
+	removeAllFilesOlderThanOneDay()
+	c.JSON(http.StatusOK, gin.H{"message": "Cleanup complete"})
 }
 
 func handlePing(c *gin.Context) {
@@ -129,5 +147,24 @@ func merge(dataDir string, session string) error {
 	} else {
 		log.Printf("Error merging PDFs: %v", err)
 		return err
+	}
+}
+
+func dailyTask() {
+	log.Println("Running daily task...")
+	removeAllFilesOlderThanOneDay()
+}
+
+func removeAllFilesOlderThanOneDay() {
+	files, err := os.ReadDir(globalConfig.DataDir)
+	if err != nil {
+		log.Printf("Error reading data dir: %v", err)
+		return
+	}
+	for _, file := range files {
+		if file.IsDir() {
+			sessionDir := filepath.Join(globalConfig.DataDir, file.Name())
+			os.RemoveAll(sessionDir)
+		}
 	}
 }
