@@ -13,7 +13,9 @@ type Config struct {
 type InputSource string
 
 type ScanRequest struct {
-	InputSource string `json:"inputSource"`
-	Duplex      bool   `json:"duplex"`
-	Session     string `json:"session"`
+	InputSource string   `json:"inputSource"`
+	Duplex      bool     `json:"duplex"`
+	Session     string   `json:"session"`
+	Recipients  []string `json:"recipients"`
+	Paperless   bool     `json:"paperless"`
 }

@@ -63,7 +63,17 @@ func handleScan(cfg *Config) gin.HandlerFunc {
 			return
 		}
 
+		status, err := cfg.Airscan.ScannerStatus()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
 		inputSource := InputSource(req.InputSource)
+		if status.ADFState == "ScannerAdfEmpty" && inputSource == "Auto" {
+			inputSource = Platen
+		}
+
 		if inputSource != Platen && inputSource != Feeder {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input source. Please use 'Platen' or 'Feeder'."})
 			return
@@ -84,14 +94,24 @@ func handleScan(cfg *Config) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"session": session})
 		} else {
 			file := filepath.Join(cfg.DataDir, session, "scanned.pdf")
-			tos := []*mail.Email{mail.NewEmail("Roger", "owner@example.com")}
-			emailStatus := SendEmail(tos, file)
-			err := PostToPaperless("https://papers-a.example.com", file)
-			var paperlessStatus string
-			if err != nil {
-				paperlessStatus = "error"
-			} else {
-				paperlessStatus = "success"
+			var emailStatus bool
+			var paperlessStatus string = "not requested"
+
+			tos := []*mail.Email{}
+			for _, recipient := range req.Recipients {
+				tos = append(tos, mail.NewEmail(recipient, recipient))
+			}
+			if len(tos) != 0 {
+				// tos = append(tos, mail.NewEmail("Roger", "owner@example.com"))
+				emailStatus = SendEmail(tos, file)
+			}
+			if req.Paperless {
+				err := PostToPaperless("https://papers-a.example.com", file)
+				if err != nil {
+					paperlessStatus = "error"
+				} else {
+					paperlessStatus = "success"
+				}
 			}
 			c.JSON(http.StatusOK, gin.H{
 				"link":            fmt.Sprintf("http://%s/scanned/%s/scanned.pdf", c.Request.Host, session),
