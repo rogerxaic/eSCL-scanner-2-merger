@@ -50,7 +50,7 @@ func GetSettings(inputSource InputSource) *airscan.ScanSettings {
 func Scan(cfg *Config, settings *airscan.ScanSettings, session string, filename string) error {
 	scan, err := cfg.Airscan.Scan(settings)
 	if err != nil {
-		log.Print(err)
+		log.Printf("Airscan.Scan error: %v", err)
 		// c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return err
 	}

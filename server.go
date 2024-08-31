@@ -70,8 +70,12 @@ func handleScan(cfg *Config) gin.HandlerFunc {
 		}
 
 		inputSource := InputSource(req.InputSource)
-		if status.ADFState == "ScannerAdfEmpty" && inputSource == "Auto" {
-			inputSource = Platen
+		if inputSource == "Auto" {
+			if status.ADFState == "ScannerAdfEmpty" {
+				inputSource = Platen
+			} else {
+				inputSource = Feeder
+			}
 		}
 
 		if inputSource != Platen && inputSource != Feeder {
