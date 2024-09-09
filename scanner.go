@@ -40,8 +40,8 @@ func GetSettings(inputSource InputSource) *airscan.ScanSettings {
 	settings := preset.GrayscaleA4ADF()
 	settings.InputSource = string(inputSource)
 	settings.ColorMode = "RGB24"
-	settings.ScanRegions.Regions[0].Width = 2550
-	settings.ScanRegions.Regions[0].Height = 3300
+	settings.ScanRegions.Regions[0].Width = 2481
+	settings.ScanRegions.Regions[0].Height = 3507
 	settings.DocumentFormat = "application/pdf"
 	settings.Duplex = false
 	return settings
