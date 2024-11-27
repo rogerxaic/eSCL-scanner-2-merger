@@ -9,7 +9,7 @@ interface WebSocketState {
   scanResults: { [key: string]: ScanResult };
 }
 
-export function useWebSocket({host, secure}: {host: string, secure: boolean}): [WebSocketState, React.Dispatch<React.SetStateAction<WebSocketState>>] {
+export function useWebSocket({host, secure}: {host: string, secure: boolean}): WebSocketState {
   const [state, setState] = useState<WebSocketState>({
     ws: null,
     scanRequest: null,
@@ -68,5 +68,5 @@ export function useWebSocket({host, secure}: {host: string, secure: boolean}): [
     return () => websocket.close();
   }, []);
 
-  return [state, setState];
+  return state;
 }

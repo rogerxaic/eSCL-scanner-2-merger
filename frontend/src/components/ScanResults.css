@@ -8,11 +8,12 @@
     border: none;
     border-radius: 4px;
     margin-right: 1rem;
+    height: 40px;
 }
 
 .scan-button:disabled {
-    background-color: #ccc;
-    cursor: not-allowed;
+    background-color: #ccc !important;
+    cursor: not-allowed !important;
 }
 
 .scan-button.merge {
@@ -28,7 +29,19 @@
 .scan-button.clear {
     background-color: #dc3545;
     cursor: pointer;
+}
+
+.scan-button.send {
+    background-color: #28a745;
+    cursor: pointer;
     margin-right: 0;
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+}
+
+.scan-button.settings {
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
 }
 
 .scan-results-grid {

@@ -1,24 +1,33 @@
-import React from "react";
-import { ScanRequest } from "../types";
+import React, { useEffect, useState } from "react";
 
 const DEFAULT_RECIPIENTS = ["scanner@example.com", "user@example.com"];
 
 interface ScanOptionsProps {
-    scanRequest: ScanRequest;
-    onUpdate: (updatedRequest: ScanRequest) => void;
+    onPaperlessInstancesChange: (paperlessInstances: string[]) => void;
+    onEmailsChange: (emails: string[]) => void;
 }
 
 export function ScanOptions({
-    scanRequest,
-    onUpdate,
+    onPaperlessInstancesChange,
+    onEmailsChange,
 }: ScanOptionsProps): React.ReactElement {
+    const [emails, setEmails] = useState<string[]>([]);
+    const [paperlessInstances, setPaperlessInstances] = useState<string[]>([]);
+
+    useEffect(() => {
+        onEmailsChange(emails);
+        onPaperlessInstancesChange(paperlessInstances);
+    }, [
+        emails,
+        paperlessInstances,
+        onEmailsChange,
+        onPaperlessInstancesChange,
+    ]);
+
     const handleAddRecipient = (input: HTMLInputElement) => {
         const value = input.value.trim();
-        if (value && !scanRequest.recipients.includes(value)) {
-            onUpdate({
-                ...scanRequest,
-                recipients: [...scanRequest.recipients, value],
-            });
+        if (value && !emails.includes(value)) {
+            setEmails([...emails, value]);
             input.value = "";
         }
     };
@@ -30,21 +39,15 @@ export function ScanOptions({
                 <label>
                     <input
                         type="checkbox"
-                        checked={scanRequest.paperlessInstances.includes(
-                            "papers-a.example.com"
-                        )}
+                        checked={paperlessInstances.includes("papers-a.example.com")}
                         onChange={(e) =>
-                            onUpdate({
-                                ...scanRequest,
-                                paperlessInstances: e.target.checked
-                                    ? [
-                                          ...scanRequest.paperlessInstances,
-                                          "papers-a.example.com",
-                                      ]
-                                    : scanRequest.paperlessInstances.filter(
+                            setPaperlessInstances(
+                                e.target.checked
+                                    ? [...paperlessInstances, "papers-a.example.com"]
+                                    : paperlessInstances.filter(
                                           (i) => i !== "papers-a.example.com"
-                                      ),
-                            })
+                                      )
+                            )
                         }
                     />
                     Paperless (home)
@@ -52,21 +55,20 @@ export function ScanOptions({
                 <label>
                     <input
                         type="checkbox"
-                        checked={scanRequest.paperlessInstances.includes(
+                        checked={paperlessInstances.includes(
                             "papers-b.example.com"
                         )}
                         onChange={(e) =>
-                            onUpdate({
-                                ...scanRequest,
-                                paperlessInstances: e.target.checked
+                            setPaperlessInstances(
+                                e.target.checked
                                     ? [
-                                          ...scanRequest.paperlessInstances,
+                                          ...paperlessInstances,
                                           "papers-b.example.com",
                                       ]
-                                    : scanRequest.paperlessInstances.filter(
+                                    : paperlessInstances.filter(
                                           (i) => i !== "papers-b.example.com"
-                                      ),
-                            })
+                                      )
+                            )
                         }
                     />
                     Paperless (site-b)
@@ -93,17 +95,12 @@ export function ScanOptions({
                         </style>
                         <input
                             type="checkbox"
-                            checked={scanRequest.recipients.includes(recipient)}
+                            checked={emails.includes(recipient)}
                             onChange={(e) => {
                                 const newRecipients = e.target.checked
-                                    ? [...scanRequest.recipients, recipient]
-                                    : scanRequest.recipients.filter(
-                                          (r) => r !== recipient
-                                      );
-                                onUpdate({
-                                    ...scanRequest,
-                                    recipients: newRecipients,
-                                });
+                                    ? [...emails, recipient]
+                                    : emails.filter((r) => r !== recipient);
+                                setEmails(newRecipients);
                             }}
                         />
                         {recipient}
@@ -162,20 +159,18 @@ export function ScanOptions({
                 </div>
 
                 <div>
-                    {scanRequest.recipients
+                    {emails
                         .filter((r) => !DEFAULT_RECIPIENTS.includes(r))
                         .map((recipient) => (
                             <div key={recipient}>
                                 {recipient}
                                 <button
                                     onClick={() =>
-                                        onUpdate({
-                                            ...scanRequest,
-                                            recipients:
-                                                scanRequest.recipients.filter(
-                                                    (r) => r !== recipient
-                                                ),
-                                        })
+                                        setEmails(
+                                            emails.filter(
+                                                (r) => r !== recipient
+                                            )
+                                        )
                                     }
                                 >
                                     Remove

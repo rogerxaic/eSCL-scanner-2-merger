@@ -3,7 +3,6 @@ import "./App.css";
 
 import ScanResults from "./components/ScanResults";
 import { InputSourceSelector } from "./components/InputSourceSelector";
-import { ScanOptions } from "./components/ScanOptions";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { initiateScan } from "./utils/scanUtils";
 import { StatusBar } from "./components/StatusBar";
@@ -13,7 +12,7 @@ function App(): React.ReactElement {
     const secure = window.location.protocol === "https:";
     const apiBaseUrl = `${secure ? "https" : "http"}://${host}`;
 
-    const [{ ws, scanRequest, scannerStatus, scanResults }, setWebSocketState] =
+    const { ws, scanRequest, scannerStatus, scanResults } =
         useWebSocket({ host, secure });
 
     return (
@@ -32,19 +31,9 @@ function App(): React.ReactElement {
                             />
                         </div>
                         <hr />
-                        <ScanOptions
-                            scanRequest={scanRequest}
-                            onUpdate={(scanRequest) =>
-                                setWebSocketState((prev) => ({
-                                    ...prev,
-                                    scanRequest,
-                                }))
-                            }
-                        />
                     </form>
                 )}
 
-                <hr className="divider" />
                 <ScanResults results={scanResults} apiBaseUrl={apiBaseUrl} />
             </div>
         </div>

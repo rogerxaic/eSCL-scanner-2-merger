@@ -1,5 +1,7 @@
 import React from "react";
-import './ScanResults.css';
+import "./ScanResults.css";
+import "./Modal.css";
+import { ScanOptions } from "./ScanOptions";
 
 interface ScanResult {
     session: string;
@@ -10,14 +12,20 @@ interface ScanResult {
 
 interface ScanResultsProps {
     results: { [key: string]: ScanResult };
-    apiBaseUrl?: string;
+    apiBaseUrl: string;
 }
 
-const ScanResults: React.FC<ScanResultsProps> = ({ 
-    results, 
-    apiBaseUrl = 'http://localhost:8080'
-}) => {
+const ScanResults: React.FC<ScanResultsProps> = ({ results, apiBaseUrl }) => {
     const [selectedResults, setSelectedResults] = React.useState<string[]>([]);
+
+    const [emails, setEmails] = React.useState<string[]>([]);
+    const [paperlessInstances, setPaperlessInstances] = React.useState<
+        string[]
+    >([]);
+
+    const [showModal, setShowModal] = React.useState<
+        { fn: () => void; name: string } | (() => void) | boolean | undefined
+    >(undefined);
 
     const toggleSelection = (session: string) => {
         setSelectedResults((prev) =>
@@ -71,13 +79,51 @@ const ScanResults: React.FC<ScanResultsProps> = ({
         }
     };
 
+    const handleSendSelected = () => {
+        if (selectedResults.length === 0) return;
+
+        if (emails.length === 0 && paperlessInstances.length === 0) {
+            setShowModal({ fn: sendSelected, name: "Send Selected PDFs" });
+            return;
+        }
+
+        sendSelected();
+    };
+
+    const sendSelected = async () => {
+        try {
+            const response = await fetch(`${apiBaseUrl}/api/send`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    sessions: selectedResults,
+                    recipients: emails,
+                    paperlessInstances,
+                }),
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            setSelectedResults([]);
+        } catch (error) {
+            console.error("Error sending documents:", error);
+            alert("Error sending documents. Please try again.");
+        }
+    };
+
     return (
         <div className="scan-results">
             <div style={{ marginBottom: "1rem" }}>
                 <button
                     onClick={mergePDFs}
                     disabled={selectedResults.length < 2}
-                    className={`scan-button merge ${selectedResults.length < 2 ? 'disabled' : ''}`}
+                    className={`scan-button merge ${
+                        selectedResults.length < 2 ? "disabled" : ""
+                    }`}
                 >
                     Merge Selected ({selectedResults.length})
                 </button>
@@ -85,7 +131,9 @@ const ScanResults: React.FC<ScanResultsProps> = ({
                 <button
                     onClick={splitPDF}
                     disabled={selectedResults.length !== 1}
-                    className={`scan-button split ${selectedResults.length !== 1 ? 'disabled' : ''}`}
+                    className={`scan-button split ${
+                        selectedResults.length !== 1 ? "disabled" : ""
+                    }`}
                 >
                     Split PDF
                 </button>
@@ -93,17 +141,68 @@ const ScanResults: React.FC<ScanResultsProps> = ({
                 <button
                     onClick={() => setSelectedResults([])}
                     disabled={selectedResults.length === 0}
-                    className={`scan-button clear ${selectedResults.length === 0 ? 'disabled' : ''}`}
+                    className={`scan-button clear ${
+                        selectedResults.length === 0 ? "disabled" : ""
+                    }`}
                 >
                     Clear Selection
                 </button>
+                <button
+                    onClick={handleSendSelected}
+                    disabled={selectedResults.length === 0}
+                    className={`scan-button send ${
+                        selectedResults.length === 0 ? "disabled" : ""
+                    }`}
+                >
+                    Send Selected
+                </button>
+                <button
+                    className="scan-button settings"
+                    // disabled={selectedResults.length === 0}
+                    onClick={() => {
+                        setShowModal(true);
+                    }}
+                >
+                    ⚙️
+                </button>
             </div>
-            
+
+            <div className={`modal ${showModal !== undefined ? "show" : ""}`}>
+                <div className="modal-content">
+                    <button
+                        className="modal-close"
+                        onClick={() => {
+                            setShowModal(undefined);
+                        }}
+                    >
+                        ×
+                    </button>
+                    <ScanOptions
+                        onPaperlessInstancesChange={setPaperlessInstances}
+                        onEmailsChange={setEmails}
+                    />
+                    {typeof showModal === "object" && (
+                        <button
+                            onClick={() => {
+                                showModal.fn();
+                                setShowModal(undefined);
+                            }}
+                        >
+                            {showModal.name}
+                        </button>
+                    )}
+                </div>
+            </div>
+
             <div className="scan-results-grid">
                 {Object.values(results).map((result) => (
                     <div
                         key={result.session}
-                        className={`scan-result ${selectedResults.includes(result.session) ? "selected" : ""}`}
+                        className={`scan-result ${
+                            selectedResults.includes(result.session)
+                                ? "selected"
+                                : ""
+                        }`}
                         onClick={() => toggleSelection(result.session)}
                     >
                         <div className="session-id">
