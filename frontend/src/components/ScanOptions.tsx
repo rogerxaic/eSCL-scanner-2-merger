@@ -47,7 +47,7 @@ export function ScanOptions({
                             })
                         }
                     />
-                    Paperless (RW)
+                    Paperless (home)
                 </label>
                 <label>
                     <input
@@ -110,8 +110,33 @@ export function ScanOptions({
                     </label>
                 ))}
 
-                <div>
+                <div style={{ display: "flex", alignItems: "center" }}>
+                    <style>
+                        {`
+                            input[type="text"] {
+                                padding: 0.5rem;
+                                border: 2px solid #ccc;
+                                border-radius: 4px;
+                                margin-right: 0.5rem;
+                            }
+                            button {
+                                padding: 0.5rem 1rem;
+                                background-color: #0066cc;
+                                color: white;
+                                border: none;
+                                border-radius: 4px;
+                                cursor: pointer;
+                            }
+                            button:hover {
+                                background-color: #0052a3;
+                            }
+                            div {
+                                margin: 0.5rem 0;
+                            }
+                        `}
+                    </style>
                     <input
+                        style={{ width: "100%" }}
                         type="text"
                         placeholder="Add custom recipient"
                         onKeyUp={(e) => {

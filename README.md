@@ -12,7 +12,9 @@ npx nodemon --watch '*.go' --ext go --signal SIGTERM --exec 'go run *.go' -host=
 
 ```bash
 docker build . -t go-scanner:latest
-docker run -it --rm -p 8080:8080 --mount type=volume,source=scanner-data,target=/scans/ go-scanner:latest -host=host.docker.internal:1234 -dataDir=/scans
+docker run -it --rm -p 8080:8080 \
+  --mount type=volume,source=scanner-data,target=/scans/ \
+  go-scanner:latest -host=host.docker.internal:1234 -dataDir=/scans
 ```
 
 ### Using pdftk

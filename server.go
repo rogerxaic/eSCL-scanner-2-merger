@@ -90,7 +90,13 @@ func setupRoutes(r *gin.Engine, cfg *Config) {
 	}
 
 	r.StaticFile("/", "./dist/index.html")
-	r.Static("/static", "./dist") // For assets like JS, CSS, images
+	r.StaticFile("/favicon.ico", "./dist/favicon.ico")
+	r.StaticFile("/manifest.json", "./dist/manifest.json")
+	r.StaticFile("/asset-manifest.json", "./dist/asset-manifest.json")
+	r.StaticFile("/logo192.png", "./dist/logo192.png")
+	r.StaticFile("/logo512.png", "./dist/logo512.png")
+	r.StaticFile("/robots.txt", "./dist/robots.txt")
+	r.Static("/static", "./dist/static") // For assets like JS, CSS, images
 
 	// Fallback for SPA routes
 	r.NoRoute(func(c *gin.Context) {
@@ -113,15 +119,13 @@ func handleMerge(cfg *Config) gin.HandlerFunc {
 		session2 := sessions[1]
 		pdf1 := filepath.Join(cfg.DataDir, session1, "scanned.pdf")
 		pdf2 := filepath.Join(cfg.DataDir, session2, "scanned.pdf")
-		filename, err := merge2PDFs(cfg.DataDir, pdf1, pdf2)
+		filepath, session, err := merge2PDFs(cfg.DataDir, pdf1, pdf2)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 
-		session := uuid.NewString()
-
-		if err := generateThumbnail(cfg.DataDir, session, filename); err != nil {
+		if err := generateThumbnail(cfg.DataDir, session, filepath); err != nil {
 			log.Printf("Error generating thumbnail: %v", err)
 		}
 
@@ -134,7 +138,7 @@ func handleMerge(cfg *Config) gin.HandlerFunc {
 			Session:   session,
 			Error:     "",
 			Thumbnail: fmt.Sprintf("http://%s/api/thumbnails/%s", c.Request.Host, session),
-			PDF:       fmt.Sprintf("http://%s/api/scanned/%s", c.Request.Host, filename),
+			PDF:       fmt.Sprintf("http://%s/api/scanned/%s", c.Request.Host, filepath),
 		})
 		c.JSON(http.StatusOK, gin.H{"message": "PDFs merged successfully"})
 	}
@@ -142,14 +146,33 @@ func handleMerge(cfg *Config) gin.HandlerFunc {
 
 func handleSplit(cfg *Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		session := c.Param("session")
+		var body struct {
+			Session string `json:"session"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		session := body.Session
 		pdf := filepath.Join(cfg.DataDir, session, "scanned.pdf")
-		date, err := splitPDF(cfg.DataDir, pdf)
+		log.Printf("Splitting PDF: %s", pdf)
+		session, numFiles, err := splitPDF(cfg.DataDir, pdf)
+		log.Printf("Split PDF: %s into %d files", session, numFiles)
+		appendSession := session
+		for i := 1; i <= numFiles; i++ {
+			appendSession = fmt.Sprintf("%s-%d", session, i)
+			scanResults = append(scanResults, ScanResult{
+				Session:   appendSession,
+				Error:     "",
+				Thumbnail: fmt.Sprintf("http://%s/api/thumbnails/%s", c.Request.Host, appendSession),
+				PDF:       fmt.Sprintf("http://%s/api/scanned/%s/scanned.pdf", c.Request.Host, appendSession),
+			})
+		}
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"date": date})
+		c.JSON(http.StatusOK, gin.H{"session": session})
 	}
 }
 
@@ -204,7 +227,7 @@ func handleScan(cfg *Config) gin.HandlerFunc {
 			session = uuid.NewString()
 		}
 		broadcastScannerStatus()
-		if err := processScan(cfg, settings, session, req.Duplex); err != nil {
+		if err := processScan(cfg, settings, session); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			scannerStatus.Scanning = false
 			broadcastScannerStatus()
@@ -213,7 +236,7 @@ func handleScan(cfg *Config) gin.HandlerFunc {
 		scannerStatus.Scanning = false
 		broadcastScannerStatus()
 
-		if err := generateThumbnail(cfg.DataDir, session, fmt.Sprintf("%s/scanned.pdf", session)); err != nil {
+		if err := generateThumbnail(cfg.DataDir, session, filepath.Join(cfg.DataDir, session, "scanned.pdf")); err != nil {
 			log.Printf("%v", err)
 		}
 
@@ -257,25 +280,9 @@ func handleScan(cfg *Config) gin.HandlerFunc {
 	}
 }
 
-func processScan(cfg *Config, settings *airscan.ScanSettings, session string, isDuplex bool) error {
+func processScan(cfg *Config, settings *airscan.ScanSettings, session string) error {
 	scannerStatus.Scanning = true
-	if isDuplex {
-		if err := Scan(cfg, settings, session, "recto"); err != nil {
-			scannerStatus.Scanning = false
-			return err
-		}
-		if session != "" {
-			if err := Scan(cfg, settings, session, "verso"); err != nil {
-				scannerStatus.Scanning = false
-				return err
-			}
-			scannerStatus.Scanning = false
-			return merge(cfg.DataDir, session)
-		}
-	} else {
-		return Scan(cfg, settings, session, "scanned")
-	}
-	return nil
+	return Scan(cfg, settings, session, "scanned")
 }
 
 func handleScannedFile(cfg *Config) gin.HandlerFunc {
@@ -287,26 +294,37 @@ func handleScannedFile(cfg *Config) gin.HandlerFunc {
 	}
 }
 
-func splitPDF(dataDir string, pdf string) (string, error) {
-	date := time.Now().Format("2006-01-02")
+func splitPDF(dataDir string, pdf string) (string, int, error) {
+	session := uuid.NewString()
+
+	os.MkdirAll(filepath.Join(dataDir, session), 0755)
+
+	log.Printf("Splitting PDF: %s", pdf)
 	params := []string{
 		fmt.Sprintf("A=%s", pdf),
 		"burst",
 		"output",
-		fmt.Sprintf("%s/%s-scan-%%d.pdf", dataDir, date),
+		fmt.Sprintf("%s/%s/scanned-%%d.pdf", dataDir, session),
 	}
+	log.Printf("pdftk params: %v", params)
 	cmd := exec.Command("pdftk", params...)
 	err := cmd.Run()
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
-	return date, nil
+	// Count number of files in session directory
+	files, err := os.ReadDir(filepath.Join(dataDir, session))
+	if err != nil {
+		return "", 0, fmt.Errorf("error reading session directory: %v", err)
+	}
+	numFiles := len(files)
+	log.Printf("Split PDF: %s into %d files.", session, numFiles)
+	return session, numFiles, nil
 }
 
-func merge2PDFs(dataDir string, path1 string, path2 string) (string, error) {
+func merge2PDFs(dataDir string, path1 string, path2 string) (string, string, error) {
 	// pdftk A=$RECTO B=$VERSO shuffle A Bend-1 output merged_$RECTO
 	uuid := uuid.NewString()
-	date := time.Now().Format("2006-01-02")
 
 	os.MkdirAll(filepath.Join(dataDir, uuid), 0755)
 
@@ -317,7 +335,7 @@ func merge2PDFs(dataDir string, path1 string, path2 string) (string, error) {
 		"A",
 		"Bend-1",
 		"output",
-		fmt.Sprintf("%s/%s/%s-scan.pdf", dataDir, uuid, date),
+		fmt.Sprintf("%s/%s/scanned.pdf", dataDir, uuid),
 	}
 	cmd := exec.Command("pdftk", params...)
 	err := cmd.Run()
@@ -325,25 +343,19 @@ func merge2PDFs(dataDir string, path1 string, path2 string) (string, error) {
 	if err == nil {
 		os.Remove(path1)
 		os.Remove(path2)
-		return fmt.Sprintf("%s/%s-scan.pdf", uuid, date), nil
+		return fmt.Sprintf("%s/%s/scanned.pdf", dataDir, uuid), uuid, nil
 	} else {
 		log.Printf("Error merging PDFs: %v", err)
-		return "", err
+		return "", "", err
 	}
-}
-
-func merge(dataDir string, session string) error {
-	sessionDir := filepath.Join(dataDir, session)
-	_, err := merge2PDFs(dataDir, sessionDir+"/scanned.pdf", sessionDir+"/scanned.pdf")
-	if err != nil {
-		return err
-	}
-	return nil
 }
 
 func dailyTask() {
 	log.Println("Running daily task...")
 	removeAllFilesOlderThanOneDay()
+	scanResults = []ScanResult{}
+	broadcastScanResults()
+	broadcastScannerStatus()
 }
 
 func removeAllFilesOlderThanOneDay() {
@@ -491,8 +503,7 @@ func broadcastScannerStatus() {
 	}
 }
 
-func generateThumbnail(dataDir string, session string, filename string) error {
-	pdfPath := filepath.Join(dataDir, filename)
+func generateThumbnail(dataDir string, session string, pdfPath string) error {
 	thumbnailDir := filepath.Join(dataDir, "thumbnails")
 
 	if err := os.MkdirAll(thumbnailDir, 0755); err != nil {

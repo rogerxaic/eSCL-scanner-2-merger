@@ -26,7 +26,11 @@ export function InputSourceSelector({ inputSource, onChange }: InputSourceSelect
                             checked={(inputSource || "Auto") === source}
                             onChange={() => {}} // Handled by onClick
                         />
-                        <span>{source}</span>
+                        <span>
+                            {source === "Auto" ? "Auto" :
+                             source === "Platen" ? "Glass" :
+                             source === "Feeder" ? "Top tray" : source}
+                        </span>
                     </div>
                 ))}
             </div>

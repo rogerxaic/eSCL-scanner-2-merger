@@ -88,6 +88,7 @@ function App() {
                     position: "fixed",
                     top: 0,
                     left: 0,
+                    margin: "0",
                     zIndex: 1000,
                 }}
             >
@@ -98,9 +99,8 @@ function App() {
                     : "Not connected to scanner"}
             </div>
 
-            <header className="App-header" style={{ paddingTop: "35px" }}>
+            <div style={{ padding: "35px" }}>
                 {scanRequest && (
-                    
                     <form className="scanner-form">
                         <InputSourceSelector
                             inputSource={scanRequest.inputSource}
@@ -157,7 +157,7 @@ function App() {
                 )}
                 <hr style={{ width: "100%", margin: "20px 0" }} />
                 <ScanResults results={scanResults} />
-            </header>
+            </div>
         </div>
     );
 }
