@@ -32,4 +32,6 @@ tsh scp -r . pi@target:/home/pi/eSCL-scanner-2-merger/go-scanner
 tsh scp -r *.go pi@target:/home/pi/eSCL-scanner-2-merger/go-scanner
 tsh scp -r go.sum go.mod Dockerfile .Dockerignore pi@target:/home/pi/eSCL-scanner-2-merger/go-scanner
 tsh scp -r frontend/pa* frontend/ts* frontend/src frontend/public pi@target:/home/pi/eSCL-scanner-2-merger/go-scanner/frontend
+
+tsh ssh pi@target "docker compose -f /home/pi/eSCL-scanner-2-merger/compose.yaml up -d --build"
 ```
