@@ -75,22 +75,13 @@ function App() {
     return (
         <div className="App">
             <div
-                style={{
-                    backgroundColor: ws
-                        ? scannerStatus?.scanning
-                            ? "#0066cc"
-                            : "#00cc00"
-                        : "#ff0000",
-                    color: "white",
-                    width: "100vw",
-                    padding: "8px 0",
-                    textAlign: "center",
-                    position: "fixed",
-                    top: 0,
-                    left: 0,
-                    margin: "0",
-                    zIndex: 1000,
-                }}
+                className={`status-bar ${
+                    !ws
+                        ? "status-bar--disconnected"
+                        : scannerStatus?.scanning
+                        ? "status-bar--scanning"
+                        : "status-bar--connected"
+                }`}
             >
                 {ws
                     ? scannerStatus?.scanning
@@ -99,7 +90,7 @@ function App() {
                     : "Not connected to scanner"}
             </div>
 
-            <div style={{ padding: "35px" }}>
+            <div className="content-wrapper">
                 {scanRequest && (
                     <form className="scanner-form">
                         <InputSourceSelector
@@ -121,9 +112,7 @@ function App() {
                     </form>
                 )}
 
-                {/* <pre>{JSON.stringify(scanRequest, null, 2)}</pre> */}
-
-                <hr style={{ width: "100%", margin: "20px 0" }} />
+                <hr className="divider" />
                 {scanRequest && (
                     <button
                         onClick={async () => {
@@ -155,7 +144,7 @@ function App() {
                         Scan
                     </button>
                 )}
-                <hr style={{ width: "100%", margin: "20px 0" }} />
+                <hr className="divider" />
                 <ScanResults results={scanResults} />
             </div>
         </div>
