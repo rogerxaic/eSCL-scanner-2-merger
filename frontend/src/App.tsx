@@ -11,6 +11,7 @@ import { StatusBar } from "./components/StatusBar";
 function App(): React.ReactElement {
     const host = window.location.host;
     const secure = window.location.protocol === "https:";
+    const apiBaseUrl = `${secure ? "https" : "http"}://${host}`;
 
     const [{ ws, scanRequest, scannerStatus, scanResults }, setWebSocketState] =
         useWebSocket({ host, secure });
@@ -24,7 +25,9 @@ function App(): React.ReactElement {
                     <form className="scanner-form">
                         <div className="scanner-form__row">
                             <InputSourceSelector
-                                onScan={(inputSource) => initiateScan(inputSource, { host, secure })}
+                                onScan={(inputSource) =>
+                                    initiateScan(inputSource, apiBaseUrl)
+                                }
                                 disabled={scannerStatus?.scanning || !ws}
                             />
                         </div>
@@ -42,7 +45,7 @@ function App(): React.ReactElement {
                 )}
 
                 <hr className="divider" />
-                <ScanResults results={scanResults} />
+                <ScanResults results={scanResults} apiBaseUrl={apiBaseUrl} />
             </div>
         </div>
     );

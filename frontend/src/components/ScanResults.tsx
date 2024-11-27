@@ -1,4 +1,5 @@
 import React from "react";
+import './ScanResults.css';
 
 interface ScanResult {
     session: string;
@@ -9,9 +10,13 @@ interface ScanResult {
 
 interface ScanResultsProps {
     results: { [key: string]: ScanResult };
+    apiBaseUrl?: string;
 }
 
-const ScanResults: React.FC<ScanResultsProps> = ({ results }) => {
+const ScanResults: React.FC<ScanResultsProps> = ({ 
+    results, 
+    apiBaseUrl = 'http://localhost:8080'
+}) => {
     const [selectedResults, setSelectedResults] = React.useState<string[]>([]);
 
     const toggleSelection = (session: string) => {
@@ -28,7 +33,7 @@ const ScanResults: React.FC<ScanResultsProps> = ({ results }) => {
         setSelectedResults([]);
 
         try {
-            const response = await fetch("http://localhost:8080/api/merge", {
+            const response = await fetch(`${apiBaseUrl}/api/merge`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -50,7 +55,7 @@ const ScanResults: React.FC<ScanResultsProps> = ({ results }) => {
         setSelectedResults([]);
 
         try {
-            const response = await fetch("http://localhost:8080/api/split", {
+            const response = await fetch(`${apiBaseUrl}/api/split`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -72,19 +77,7 @@ const ScanResults: React.FC<ScanResultsProps> = ({ results }) => {
                 <button
                     onClick={mergePDFs}
                     disabled={selectedResults.length < 2}
-                    style={{
-                        marginRight: "1rem",
-                        padding: "0.5rem 1rem",
-                        backgroundColor:
-                            selectedResults.length < 2 ? "#ccc" : "#0066cc",
-                        color: "white",
-                        border: "none",
-                        borderRadius: "4px",
-                        cursor:
-                            selectedResults.length < 2
-                                ? "not-allowed"
-                                : "pointer",
-                    }}
+                    className={`scan-button merge ${selectedResults.length < 2 ? 'disabled' : ''}`}
                 >
                     Merge Selected ({selectedResults.length})
                 </button>
@@ -92,19 +85,7 @@ const ScanResults: React.FC<ScanResultsProps> = ({ results }) => {
                 <button
                     onClick={splitPDF}
                     disabled={selectedResults.length !== 1}
-                    style={{
-                        marginRight: "1rem",
-                        padding: "0.5rem 1rem",
-                        backgroundColor:
-                            selectedResults.length !== 1 ? "#ccc" : "#0066cc",
-                        color: "white",
-                        border: "none",
-                        borderRadius: "4px",
-                        cursor:
-                            selectedResults.length !== 1
-                                ? "not-allowed"
-                                : "pointer",
-                    }}
+                    className={`scan-button split ${selectedResults.length !== 1 ? 'disabled' : ''}`}
                 >
                     Split PDF
                 </button>
@@ -112,113 +93,48 @@ const ScanResults: React.FC<ScanResultsProps> = ({ results }) => {
                 <button
                     onClick={() => setSelectedResults([])}
                     disabled={selectedResults.length === 0}
-                    style={{
-                        padding: "0.5rem 1rem",
-                        backgroundColor:
-                            selectedResults.length === 0 ? "#ccc" : "#dc3545",
-                        color: "white",
-                        border: "none",
-                        borderRadius: "4px",
-                        cursor:
-                            selectedResults.length === 0
-                                ? "not-allowed"
-                                : "pointer",
-                    }}
+                    className={`scan-button clear ${selectedResults.length === 0 ? 'disabled' : ''}`}
                 >
                     Clear Selection
                 </button>
             </div>
             
-                <div className="scan-results-grid" style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(4, 1fr)',
-                    gap: '16px',
-                    width: '100%'
-                }}>
-                    {Object.values(results).map((result) => (
-                        <div
-                            key={result.session}
-                            className={`scan-result ${
-                                selectedResults.includes(result.session)
-                                    ? "selected"
-                                    : ""
-                            }`}
-                            onClick={() => toggleSelection(result.session)}
-                            style={{
-                                boxSizing: "border-box",
-                                border: selectedResults.includes(result.session)
-                                    ? "4px solid #0066cc"
-                                    : "2px solid #666",
-                                borderRadius: "8px",
-                                padding: selectedResults.includes(result.session)
-                                    ? "14px"
-                                    : "16px",
-                                backgroundColor: selectedResults.includes(
-                                    result.session
-                                )
-                                    ? "#e0e0e0"
-                                    : "#f0f0f0",
-                                color: "#333",
-                                cursor: "pointer",
-                                display: "flex",
-                                flexDirection: "column",
-                                alignItems: "center",
-                                justifyContent: "space-between",
-                                aspectRatio: "1 / 1",
-                                width: "calc(100% - 16px)",
-                            }}
-                        >
-                            <div className="session-id" style={{ fontSize: "0.6em" }}>
-                                Session: {result.session}
-                            </div>
-                            {result.error ? (
-                                <div className="error" style={{ fontSize: "0.8em" }}>
-                                    {result.error}
-                                </div>
-                            ) : (
-                                <>
-                                    <div
-                                        style={{
-                                            border: "1px solid #ccc",
-                                            padding: "8px",
-                                            backgroundColor: "#fff",
-                                            display: "flex",
-                                            justifyContent: "center",
-                                            alignItems: "center",
-                                            width: "80%",
-                                            height: "80%",
-                                        }}
-                                    >
-                                        <img
-                                            src={result.thumbnail}
-                                            alt="Scan thumbnail"
-                                            style={{
-                                                maxWidth: "100%",
-                                                maxHeight: "100%",
-                                                objectFit: "contain",
-                                            }}
-                                        />
-                                    </div>
-                                    <div>
-                                        <a
-                                            href={result.pdf}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            onClick={(e) => e.stopPropagation()}
-                                            style={{
-                                                color: "#0066cc",
-                                                textDecoration: "none",
-                                                fontWeight: "bold",
-                                                fontSize: "0.8em",
-                                            }}
-                                        >
-                                            Download
-                                        </a>
-                                    </div>
-                                </>
-                            )}
+            <div className="scan-results-grid">
+                {Object.values(results).map((result) => (
+                    <div
+                        key={result.session}
+                        className={`scan-result ${selectedResults.includes(result.session) ? "selected" : ""}`}
+                        onClick={() => toggleSelection(result.session)}
+                    >
+                        <div className="session-id">
+                            Session: {result.session}
                         </div>
-                    ))}
+                        {result.error ? (
+                            <div className="error">{result.error}</div>
+                        ) : (
+                            <>
+                                <div className="thumbnail-container">
+                                    <img
+                                        src={result.thumbnail}
+                                        alt="Scan thumbnail"
+                                        className="thumbnail"
+                                    />
+                                </div>
+                                <div>
+                                    <a
+                                        href={result.pdf}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="download-link"
+                                    >
+                                        Download
+                                    </a>
+                                </div>
+                            </>
+                        )}
+                    </div>
+                ))}
             </div>
         </div>
     );

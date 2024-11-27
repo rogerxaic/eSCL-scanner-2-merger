@@ -1,7 +1,6 @@
 export type InputSource = "Platen" | "Feeder" | "Auto";
 
 export interface ScanRequest {
-    // duplex: boolean;
     inputSource: InputSource;
     session: string;
     recipients: string[];
@@ -25,11 +24,3 @@ export interface BroadcastData {
     scanRequest?: ScanRequest;
     scannerStatus?: ScannerStatus;
 }
-
-// interface ScanRequest {
-//     duplex: boolean;
-//     inputSource: "Platen" | "Feeder" | "Auto";
-//     session: string;
-//     recipients: string[];
-//     paperless: boolean;
-// }

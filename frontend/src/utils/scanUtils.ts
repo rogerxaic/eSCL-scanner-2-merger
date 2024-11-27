@@ -1,9 +1,9 @@
 import { InputSource } from "../types";
 
-export async function initiateScan(inputSource: InputSource, {host, secure}: {host: string, secure: boolean}) {
+export async function initiateScan(inputSource: InputSource, apiBaseUrl: string) {
     try {
       const response = await fetch(
-        `${secure ? "https" : "http"}://${host}/api/scan`,
+        `${apiBaseUrl}/api/scan`,
         {
           method: "POST",
           headers: {
