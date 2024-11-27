@@ -158,7 +158,6 @@ const ScanResults: React.FC<ScanResultsProps> = ({ results, apiBaseUrl }) => {
                 </button>
                 <button
                     className="scan-button settings"
-                    // disabled={selectedResults.length === 0}
                     onClick={() => {
                         setShowModal(true);
                     }}

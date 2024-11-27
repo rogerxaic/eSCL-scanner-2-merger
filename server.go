@@ -85,6 +85,7 @@ func setupRoutes(r *gin.Engine, cfg *Config, pdfManager *PDFManager) {
 		api.POST("/scan", handleScan(cfg))
 		api.POST("/split", handleSplit(cfg))
 		api.POST("/merge", handleMerge(cfg, pdfManager))
+		api.POST("/send", handleSend(cfg))
 		api.GET("/scanned/:session/:file", handleScannedFile(cfg))
 		api.GET("/thumbnails/:session", handleThumbnail(cfg))
 		api.GET("/cleanup", handleCleanup)
@@ -106,6 +107,36 @@ func setupRoutes(r *gin.Engine, cfg *Config, pdfManager *PDFManager) {
 	r.NoRoute(func(c *gin.Context) {
 		c.File("./dist/index.html")
 	})
+}
+
+func handleSend(cfg *Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var body struct {
+			Recipients         []string `json:"recipients"`
+			PaperlessInstances []string `json:"paperlessInstances"`
+			Sessions           []string `json:"sessions"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		log.Printf("Send request received: %v", body)
+		if len(body.Recipients) == 0 && len(body.PaperlessInstances) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "No recipients or paperless instances provided"})
+			return
+		}
+		for _, recipient := range body.Recipients {
+			for _, session := range body.Sessions {
+				SendEmail([]*mail.Email{mail.NewEmail(recipient, recipient)}, filepath.Join(cfg.DataDir, session, "scanned.pdf"))
+			}
+		}
+		for _, instance := range body.PaperlessInstances {
+			for _, session := range body.Sessions {
+				PostToPaperless("https://"+instance, filepath.Join(cfg.DataDir, session, "scanned.pdf"))
+			}
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "Send request received"})
+	}
 }
 
 func handleMerge(cfg *Config, pdfManager *PDFManager) gin.HandlerFunc {
