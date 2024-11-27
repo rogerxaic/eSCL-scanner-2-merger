@@ -1,12 +1,14 @@
-import React from 'react';
-import { ScanRequest } from '../types';
+import React, { useState } from 'react';
+import { InputSource } from '../types';
 
 interface InputSourceSelectorProps {
-    inputSource: ScanRequest['inputSource'];
-    onChange: (source: ScanRequest['inputSource']) => void;
+    onScan: (inputSource: InputSource) => void;
+    disabled: boolean;
 }
 
-export function InputSourceSelector({ inputSource, onChange }: InputSourceSelectorProps) {
+export function InputSourceSelector({ onScan, disabled }: InputSourceSelectorProps): React.ReactElement {
+    const [selectedSource, setSelectedSource] = useState<InputSource>("Auto");
+
     return (
         <div className="input-source-container">
             <p>Input Source:</p>
@@ -15,15 +17,15 @@ export function InputSourceSelector({ inputSource, onChange }: InputSourceSelect
                     <div
                         key={source}
                         className={`input-source-tile ${
-                            (inputSource || "Auto") === source ? "selected" : ""
+                            selectedSource === source ? "selected" : ""
                         }`}
-                        onClick={() => onChange(source as "Auto" | "Platen" | "Feeder")}
+                        onClick={() => setSelectedSource(source as "Auto" | "Platen" | "Feeder")}
                     >
                         <input
                             type="radio"
                             name="inputSource"
                             value={source}
-                            checked={(inputSource || "Auto") === source}
+                            checked={selectedSource === source}
                             onChange={() => {}} // Handled by onClick
                         />
                         <span>
@@ -33,6 +35,7 @@ export function InputSourceSelector({ inputSource, onChange }: InputSourceSelect
                         </span>
                     </div>
                 ))}
+                <button onClick={() => onScan(selectedSource)} disabled={disabled}>Scan</button>
             </div>
             <style>{`
                 .input-source-container {

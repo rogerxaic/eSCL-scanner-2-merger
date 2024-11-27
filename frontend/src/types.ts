@@ -1,6 +1,8 @@
+export type InputSource = "Platen" | "Feeder" | "Auto";
+
 export interface ScanRequest {
-    duplex: boolean;
-    inputSource: "Platen" | "Feeder" | "Auto";
+    // duplex: boolean;
+    inputSource: InputSource;
     session: string;
     recipients: string[];
     paperlessInstances: string[];
