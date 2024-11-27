@@ -10,13 +10,19 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
+var possiblePaperlessInstances = []string{"papers-a.example.com", "papers-b.example.com"}
+
 func SetupPaperless() {
-	username := os.Getenv("PAPERLESS_USERNAME")
-	password := os.Getenv("PAPERLESS_PASSWORD")
-	if username == "" || password == "" {
-		log.Fatal("PAPERLESS_USERNAME or PAPERLESS_PASSWORD is not set")
+	for _, instance := range possiblePaperlessInstances {
+		instance = strings.ToUpper(strings.ReplaceAll(instance, ".", "_"))
+		username := os.Getenv(fmt.Sprintf("PAPERLESS_%s_USERNAME", instance))
+		password := os.Getenv(fmt.Sprintf("PAPERLESS_%s_PASSWORD", instance))
+		if username == "" || password == "" {
+			log.Fatalf("PAPERLESS_%s_USERNAME or PAPERLESS_%s_PASSWORD is not set", instance, instance)
+		}
 	}
 }
 
