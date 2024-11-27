@@ -26,5 +26,10 @@ docker run -it --rm -p 8080:8080 --mount type=volume,source=scanner-data,target=
 ## Deploying
 
 ```bash
+tsh ssh pi@target rm -rf /home/pi/eSCL-scanner-2-merger/go-scanner/.git
 tsh scp -r . pi@target:/home/pi/eSCL-scanner-2-merger/go-scanner
+
+tsh scp -r *.go pi@target:/home/pi/eSCL-scanner-2-merger/go-scanner
+tsh scp -r go.sum go.mod Dockerfile .Dockerignore pi@target:/home/pi/eSCL-scanner-2-merger/go-scanner
+tsh scp -r frontend/pa* frontend/ts* frontend/src frontend/public pi@target:/home/pi/eSCL-scanner-2-merger/go-scanner/frontend
 ```

@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"sync"
 	"time"
 
@@ -17,10 +16,12 @@ import (
 	"github.com/robfig/cron/v3"
 	"github.com/sendgrid/sendgrid-go/helpers/mail"
 	"github.com/stapelberg/airscan"
+	"golang.org/x/exp/slices"
 )
 
 var (
 	globalConfig       *Config
+	pdfManager         *PDFManager
 	currentScanRequest = ScanRequest{
 		PaperlessInstances: []string{},
 	}
@@ -46,6 +47,9 @@ func main() {
 		log.Fatalf("error: %v", err)
 	}
 
+	// Initialize the PDFManager
+	pdfManager = NewPDFManager(globalConfig.DataDir)
+
 	// Set up cron job
 	c := cron.New()
 	_, err = c.AddFunc("0 2 * * *", dailyTask) // Run every day at 2:00 AM
@@ -55,12 +59,12 @@ func main() {
 	c.Start()
 
 	r := gin.Default()
-	setupRoutes(r, globalConfig)
+	setupRoutes(r, globalConfig, pdfManager)
 	r.Run()
 	log.Printf("Server started on http://0.0.0.0:8080")
 }
 
-func setupRoutes(r *gin.Engine, cfg *Config) {
+func setupRoutes(r *gin.Engine, cfg *Config, pdfManager *PDFManager) {
 	// Add CORS middleware
 	r.Use(func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
@@ -80,7 +84,7 @@ func setupRoutes(r *gin.Engine, cfg *Config) {
 		api.GET("/ping", handlePing)
 		api.POST("/scan", handleScan(cfg))
 		api.POST("/split", handleSplit(cfg))
-		api.POST("/merge", handleMerge(cfg))
+		api.POST("/merge", handleMerge(cfg, pdfManager))
 		api.GET("/scanned/:session/:file", handleScannedFile(cfg))
 		api.GET("/thumbnails/:session", handleThumbnail(cfg))
 		api.GET("/cleanup", handleCleanup)
@@ -104,9 +108,8 @@ func setupRoutes(r *gin.Engine, cfg *Config) {
 	})
 }
 
-func handleMerge(cfg *Config) gin.HandlerFunc {
+func handleMerge(cfg *Config, pdfManager *PDFManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var sessions []string
 		var body struct {
 			Sessions []string `json:"sessions"`
 		}
@@ -114,32 +117,22 @@ func handleMerge(cfg *Config) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		sessions = body.Sessions
-		session1 := sessions[0]
-		session2 := sessions[1]
-		pdf1 := filepath.Join(cfg.DataDir, session1, "scanned.pdf")
-		pdf2 := filepath.Join(cfg.DataDir, session2, "scanned.pdf")
-		pdfPath, session, err := merge2PDFs(cfg.DataDir, pdf1, pdf2)
+
+		pdf1 := filepath.Join(cfg.DataDir, body.Sessions[0], "scanned.pdf")
+		pdf2 := filepath.Join(cfg.DataDir, body.Sessions[1], "scanned.pdf")
+
+		pdfPath, session, err := pdfManager.Merge(pdf1, pdf2)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 
-		if err := generateThumbnail(cfg.DataDir, session, pdfPath); err != nil {
+		if err := pdfManager.GenerateThumbnail(session, pdfPath); err != nil {
 			log.Printf("Error generating thumbnail: %v", err)
 		}
 
-		// Remove the merged sessions from the results array
-		scanResults = slices.DeleteFunc(scanResults, func(r ScanResult) bool {
-			return r.Session == session1 || r.Session == session2
-		})
-
-		scanResults = append(scanResults, ScanResult{
-			Session:   session,
-			Error:     "",
-			Thumbnail: fmt.Sprintf("http://%s/api/thumbnails/%s", c.Request.Host, session),
-			PDF:       fmt.Sprintf("http://%s/api/scanned/%s/scanned.pdf", c.Request.Host, session),
-		})
+		// Update scan results...
+		updateScanResults(c, session, body.Sessions)
 		c.JSON(http.StatusOK, gin.H{"message": "PDFs merged successfully"})
 	}
 }
@@ -322,33 +315,6 @@ func splitPDF(dataDir string, pdf string) (string, int, error) {
 	return session, numFiles, nil
 }
 
-func merge2PDFs(dataDir string, path1 string, path2 string) (pdfPath string, session string, err error) {
-	session = uuid.NewString()
-	outputPath := filepath.Join(dataDir, session, "scanned.pdf")
-
-	os.MkdirAll(filepath.Join(dataDir, session), 0755)
-
-	params := []string{
-		fmt.Sprintf("A=%s", path1),
-		fmt.Sprintf("B=%s", path2),
-		"shuffle",
-		"A",
-		"Bend-1",
-		"output",
-		outputPath,
-	}
-	cmd := exec.Command("pdftk", params...)
-	err = cmd.Run()
-
-	if err == nil {
-		os.Remove(path1)
-		os.Remove(path2)
-		return outputPath, session, nil
-	}
-	log.Printf("Error merging PDFs: %v", err)
-	return "", "", err
-}
-
 func dailyTask() {
 	log.Println("Running daily task...")
 	removeAllFilesOlderThanOneDay()
@@ -528,4 +494,27 @@ func generateThumbnail(dataDir string, session string, pdfPath string) error {
 	}
 
 	return nil
+}
+
+func updateScanResults(c *gin.Context, newSession string, mergedSessions []string) {
+	// Remove the merged sessions from the results array
+	scanResults = slices.DeleteFunc(scanResults, func(r ScanResult) bool {
+		for _, session := range mergedSessions {
+			if r.Session == session {
+				return true
+			}
+		}
+		return false
+	})
+
+	// Add the new merged result
+	scanResults = append(scanResults, ScanResult{
+		Session:   newSession,
+		Error:     "",
+		Thumbnail: fmt.Sprintf("http://%s/api/thumbnails/%s", c.Request.Host, newSession),
+		PDF:       fmt.Sprintf("http://%s/api/scanned/%s/scanned.pdf", c.Request.Host, newSession),
+	})
+
+	// Broadcast the updated results
+	broadcastScanResults()
 }
