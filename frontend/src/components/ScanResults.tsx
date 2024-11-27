@@ -24,7 +24,7 @@ const ScanResults: React.FC<ScanResultsProps> = ({ results, apiBaseUrl }) => {
     >([]);
 
     const [showModal, setShowModal] = React.useState<
-        { fn: () => void; name: string } | (() => void) | boolean | undefined
+        { name: string } | boolean | undefined
     >(undefined);
 
     const toggleSelection = (session: string) => {
@@ -83,7 +83,9 @@ const ScanResults: React.FC<ScanResultsProps> = ({ results, apiBaseUrl }) => {
         if (selectedResults.length === 0) return;
 
         if (emails.length === 0 && paperlessInstances.length === 0) {
-            setShowModal({ fn: sendSelected, name: "Send Selected PDFs" });
+            setShowModal({
+                name: "Send Selected PDFs",
+            });
             return;
         }
 
@@ -183,7 +185,7 @@ const ScanResults: React.FC<ScanResultsProps> = ({ results, apiBaseUrl }) => {
                     {typeof showModal === "object" && (
                         <button
                             onClick={() => {
-                                showModal.fn();
+                                sendSelected();
                                 setShowModal(undefined);
                             }}
                         >
