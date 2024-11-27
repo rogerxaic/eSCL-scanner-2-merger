@@ -119,13 +119,13 @@ func handleMerge(cfg *Config) gin.HandlerFunc {
 		session2 := sessions[1]
 		pdf1 := filepath.Join(cfg.DataDir, session1, "scanned.pdf")
 		pdf2 := filepath.Join(cfg.DataDir, session2, "scanned.pdf")
-		filepath, session, err := merge2PDFs(cfg.DataDir, pdf1, pdf2)
+		pdfPath, session, err := merge2PDFs(cfg.DataDir, pdf1, pdf2)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 
-		if err := generateThumbnail(cfg.DataDir, session, filepath); err != nil {
+		if err := generateThumbnail(cfg.DataDir, session, pdfPath); err != nil {
 			log.Printf("Error generating thumbnail: %v", err)
 		}
 
@@ -138,7 +138,7 @@ func handleMerge(cfg *Config) gin.HandlerFunc {
 			Session:   session,
 			Error:     "",
 			Thumbnail: fmt.Sprintf("http://%s/api/thumbnails/%s", c.Request.Host, session),
-			PDF:       fmt.Sprintf("http://%s/api/scanned/%s", c.Request.Host, filepath),
+			PDF:       fmt.Sprintf("http://%s/api/scanned/%s/scanned.pdf", c.Request.Host, session),
 		})
 		c.JSON(http.StatusOK, gin.H{"message": "PDFs merged successfully"})
 	}
@@ -288,9 +288,9 @@ func processScan(cfg *Config, settings *airscan.ScanSettings, session string) er
 func handleScannedFile(cfg *Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		session := c.Param("session")
-		filename := filepath.Join(cfg.DataDir, session, c.Param("file"))
-		log.Printf("Serving file: %s", filename)
-		c.FileAttachment(filename, "scanned.pdf")
+		pdfPath := filepath.Join(cfg.DataDir, session, c.Param("file"))
+		log.Printf("Serving file: %s", pdfPath)
+		c.FileAttachment(pdfPath, "scanned.pdf")
 	}
 }
 
@@ -322,11 +322,11 @@ func splitPDF(dataDir string, pdf string) (string, int, error) {
 	return session, numFiles, nil
 }
 
-func merge2PDFs(dataDir string, path1 string, path2 string) (string, string, error) {
-	// pdftk A=$RECTO B=$VERSO shuffle A Bend-1 output merged_$RECTO
-	uuid := uuid.NewString()
+func merge2PDFs(dataDir string, path1 string, path2 string) (pdfPath string, session string, err error) {
+	session = uuid.NewString()
+	outputPath := filepath.Join(dataDir, session, "scanned.pdf")
 
-	os.MkdirAll(filepath.Join(dataDir, uuid), 0755)
+	os.MkdirAll(filepath.Join(dataDir, session), 0755)
 
 	params := []string{
 		fmt.Sprintf("A=%s", path1),
@@ -335,19 +335,18 @@ func merge2PDFs(dataDir string, path1 string, path2 string) (string, string, err
 		"A",
 		"Bend-1",
 		"output",
-		fmt.Sprintf("%s/%s/scanned.pdf", dataDir, uuid),
+		outputPath,
 	}
 	cmd := exec.Command("pdftk", params...)
-	err := cmd.Run()
+	err = cmd.Run()
 
 	if err == nil {
 		os.Remove(path1)
 		os.Remove(path2)
-		return fmt.Sprintf("%s/%s/scanned.pdf", dataDir, uuid), uuid, nil
-	} else {
-		log.Printf("Error merging PDFs: %v", err)
-		return "", "", err
+		return outputPath, session, nil
 	}
+	log.Printf("Error merging PDFs: %v", err)
+	return "", "", err
 }
 
 func dailyTask() {
