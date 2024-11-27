@@ -26,7 +26,7 @@ function App() {
     React.useEffect(() => {
         // Reconnect websocket if disconnected
         const connectWebSocket = () => {
-            const websocket = new WebSocket("ws://localhost:8080/api/ws");
+            const websocket = new WebSocket(`ws://${window.location.host}/api/ws`);
 
             websocket.onopen = () => {
                 console.log("Connected to websocket");
@@ -129,7 +129,7 @@ function App() {
                         onClick={async () => {
                             try {
                                 const response = await fetch(
-                                    "http://localhost:8080/api/scan",
+                                    `${window.location.protocol}//${window.location.host}/api/scan`,
                                     {
                                         method: "POST",
                                         headers: {
