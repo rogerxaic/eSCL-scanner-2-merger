@@ -188,8 +188,8 @@ func handleSplit(cfg *Config) gin.HandlerFunc {
 			scanResults = append(scanResults, ScanResult{
 				Session:   appendSession,
 				Error:     "",
-				Thumbnail: fmt.Sprintf("http://%s/api/thumbnails/%s", c.Request.Host, appendSession),
-				PDF:       fmt.Sprintf("http://%s/api/scanned/%s/scanned.pdf", c.Request.Host, appendSession),
+				Thumbnail: fmt.Sprintf("/api/thumbnails/%s", appendSession),
+				PDF:       fmt.Sprintf("/api/scanned/%s/scanned.pdf", appendSession),
 			})
 		}
 		if err != nil {
@@ -267,8 +267,8 @@ func handleScan(cfg *Config) gin.HandlerFunc {
 		scanResults = append(scanResults, ScanResult{
 			Session:   session,
 			Error:     "",
-			Thumbnail: fmt.Sprintf("http://%s/api/thumbnails/%s", c.Request.Host, session),
-			PDF:       fmt.Sprintf("http://%s/api/scanned/%s/scanned.pdf", c.Request.Host, session),
+			Thumbnail: fmt.Sprintf("/api/thumbnails/%s", session),
+			PDF:       fmt.Sprintf("/api/scanned/%s/scanned.pdf", session),
 		})
 		broadcastScanResults()
 
@@ -542,8 +542,8 @@ func updateScanResults(c *gin.Context, newSession string, mergedSessions []strin
 	scanResults = append(scanResults, ScanResult{
 		Session:   newSession,
 		Error:     "",
-		Thumbnail: fmt.Sprintf("http://%s/api/thumbnails/%s", c.Request.Host, newSession),
-		PDF:       fmt.Sprintf("http://%s/api/scanned/%s/scanned.pdf", c.Request.Host, newSession),
+		Thumbnail: fmt.Sprintf("/api/thumbnails/%s", newSession),
+		PDF:       fmt.Sprintf("/api/scanned/%s/scanned.pdf", newSession),
 	})
 
 	// Broadcast the updated results
