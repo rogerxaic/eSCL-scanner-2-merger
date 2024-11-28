@@ -36,7 +36,7 @@ const ScanResults: React.FC<ScanResultsProps> = ({ results, apiBaseUrl }) => {
     };
 
     const mergePDFs = async () => {
-        if (selectedResults.length < 2) return;
+        if (selectedResults.length !== 2) return;
         const sessions = [...selectedResults];
         setSelectedResults([]);
 
@@ -122,9 +122,9 @@ const ScanResults: React.FC<ScanResultsProps> = ({ results, apiBaseUrl }) => {
             <div style={{ marginBottom: "1rem" }}>
                 <button
                     onClick={mergePDFs}
-                    disabled={selectedResults.length < 2}
+                    disabled={selectedResults.length !== 2}
                     className={`scan-button merge ${
-                        selectedResults.length < 2 ? "disabled" : ""
+                        selectedResults.length !== 2 ? "disabled" : ""
                     }`}
                 >
                     Merge Selected ({selectedResults.length})

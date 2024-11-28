@@ -135,6 +135,15 @@ func handleSend(cfg *Config) gin.HandlerFunc {
 				PostToPaperless("https://"+instance, filepath.Join(cfg.DataDir, session, "scanned.pdf"))
 			}
 		}
+		// If we've reached here, all sends were successful, so remove the sessions from scan results
+		scanResults = slices.DeleteFunc(scanResults, func(r ScanResult) bool {
+			for _, session := range body.Sessions {
+				if r.Session == session {
+					return true
+				}
+			}
+			return false
+		})
 		c.JSON(http.StatusOK, gin.H{"message": "Send request received"})
 	}
 }
@@ -163,7 +172,7 @@ func handleMerge(cfg *Config, pdfManager *PDFManager) gin.HandlerFunc {
 		}
 
 		// Update scan results...
-		updateScanResults(c, session, body.Sessions)
+		updateScanResults(c, session, []string{pdf1, pdf2})
 		c.JSON(http.StatusOK, gin.H{"message": "PDFs merged successfully"})
 	}
 }
