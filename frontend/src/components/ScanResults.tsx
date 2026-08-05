@@ -2,17 +2,24 @@ import React from "react";
 import "./ScanResults.css";
 import "./Modal.css";
 import { ScanOptions } from "./ScanOptions";
-
-interface ScanResult {
-    session: string;
-    error: string;
-    thumbnail: string;
-    pdf: string;
-}
+import { SettingsPanel } from "./SettingsPanel";
+import { ScanResult, Settings } from "../types";
 
 interface ScanResultsProps {
     results: { [key: string]: ScanResult };
     apiBaseUrl: string;
+}
+
+function formatCreatedAt(createdAt: string): string {
+    if (!createdAt) return "";
+    const date = new Date(createdAt);
+    if (isNaN(date.getTime())) return "";
+    return date.toLocaleString([], {
+        day: "2-digit",
+        month: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+    });
 }
 
 const ScanResults: React.FC<ScanResultsProps> = ({ results, apiBaseUrl }) => {
@@ -23,9 +30,37 @@ const ScanResults: React.FC<ScanResultsProps> = ({ results, apiBaseUrl }) => {
         string[]
     >([]);
 
+    const [settings, setSettings] = React.useState<Settings | null>(null);
+    const [errorMessage, setErrorMessage] = React.useState<string | null>(
+        null
+    );
+    const [sending, setSending] = React.useState<boolean>(false);
+
     const [showModal, setShowModal] = React.useState<
         { name: string } | boolean | undefined
     >(undefined);
+
+    React.useEffect(() => {
+        fetch(`${apiBaseUrl}/api/settings`)
+            .then((r) => r.json())
+            .then((s: Settings) => setSettings(s))
+            .catch((error) =>
+                console.error("Error loading settings:", error)
+            );
+    }, [apiBaseUrl]);
+
+    const reportError = async (prefix: string, response?: Response) => {
+        let detail = "";
+        if (response) {
+            try {
+                const body = await response.json();
+                detail = body.error ? `: ${body.error}` : "";
+            } catch {
+                detail = `: HTTP ${response.status}`;
+            }
+        }
+        setErrorMessage(`${prefix}${detail}`);
+    };
 
     const toggleSelection = (session: string) => {
         setSelectedResults((prev) =>
@@ -39,6 +74,7 @@ const ScanResults: React.FC<ScanResultsProps> = ({ results, apiBaseUrl }) => {
         if (selectedResults.length !== 2) return;
         const sessions = [...selectedResults];
         setSelectedResults([]);
+        setErrorMessage(null);
 
         try {
             const response = await fetch(`${apiBaseUrl}/api/merge`, {
@@ -50,10 +86,11 @@ const ScanResults: React.FC<ScanResultsProps> = ({ results, apiBaseUrl }) => {
             });
 
             if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+                await reportError("Combining failed", response);
             }
         } catch (error) {
             console.error("Error merging PDFs:", error);
+            setErrorMessage("Combining failed: network error");
         }
     };
 
@@ -61,6 +98,7 @@ const ScanResults: React.FC<ScanResultsProps> = ({ results, apiBaseUrl }) => {
         if (selectedResults.length !== 1) return;
         const session = selectedResults[0];
         setSelectedResults([]);
+        setErrorMessage(null);
 
         try {
             const response = await fetch(`${apiBaseUrl}/api/split`, {
@@ -72,27 +110,52 @@ const ScanResults: React.FC<ScanResultsProps> = ({ results, apiBaseUrl }) => {
             });
 
             if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+                await reportError("Split failed", response);
             }
         } catch (error) {
             console.error("Error splitting PDF:", error);
+            setErrorMessage("Split failed: network error");
+        }
+    };
+
+    const deleteResult = async (session: string) => {
+        if (!window.confirm("Delete this scan?")) return;
+        setErrorMessage(null);
+        try {
+            const response = await fetch(`${apiBaseUrl}/api/delete`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ sessions: [session] }),
+            });
+            if (!response.ok) {
+                await reportError("Delete failed", response);
+                return;
+            }
+            setSelectedResults((prev) => prev.filter((s) => s !== session));
+        } catch (error) {
+            console.error("Error deleting scan:", error);
+            setErrorMessage("Delete failed: network error");
         }
     };
 
     const handleSendSelected = () => {
         if (selectedResults.length === 0) return;
 
-        if (emails.length === 0 && paperlessInstances.length === 0) {
-            setShowModal({
-                name: "Send Selected PDFs",
-            });
-            return;
-        }
-
-        sendSelected();
+        // Always confirm the destination. Reusing the previous choice silently
+        // sent documents somewhere the user had not picked for *this* batch,
+        // and a successful send drops them from the list — so the mistake was
+        // invisible until the scans were gone.
+        setShowModal({
+            name: "Send Selected PDFs",
+        });
     };
 
     const sendSelected = async () => {
+        if (sending) return;
+        setSending(true);
+        setErrorMessage(null);
         try {
             const response = await fetch(`${apiBaseUrl}/api/send`, {
                 method: "POST",
@@ -107,30 +170,40 @@ const ScanResults: React.FC<ScanResultsProps> = ({ results, apiBaseUrl }) => {
             });
 
             if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+                await reportError("Sending failed", response);
+                return;
             }
 
             setSelectedResults([]);
         } catch (error) {
             console.error("Error sending documents:", error);
-            alert("Error sending documents. Please try again.");
+            setErrorMessage("Sending failed: network error");
+        } finally {
+            setSending(false);
         }
     };
+
+    const sortedResults = Object.values(results).sort((a, b) =>
+        (a.createdAt || "").localeCompare(b.createdAt || "")
+    );
 
     return (
         <div className="scan-results">
             <div style={{ marginBottom: "1rem" }}>
                 <button
+                    type="button"
                     onClick={mergePDFs}
                     disabled={selectedResults.length !== 2}
                     className={`scan-button merge ${
                         selectedResults.length !== 2 ? "disabled" : ""
                     }`}
+                    title="Interleaves the two selected PDFs: pages of the first, then the second in reverse (recto/verso)"
                 >
-                    Merge Selected ({selectedResults.length})
+                    Combine duplex ({selectedResults.length}/2)
                 </button>
 
                 <button
+                    type="button"
                     onClick={splitPDF}
                     disabled={selectedResults.length !== 1}
                     className={`scan-button split ${
@@ -141,6 +214,7 @@ const ScanResults: React.FC<ScanResultsProps> = ({ results, apiBaseUrl }) => {
                 </button>
 
                 <button
+                    type="button"
                     onClick={() => setSelectedResults([])}
                     disabled={selectedResults.length === 0}
                     className={`scan-button clear ${
@@ -150,6 +224,7 @@ const ScanResults: React.FC<ScanResultsProps> = ({ results, apiBaseUrl }) => {
                     Clear Selection
                 </button>
                 <button
+                    type="button"
                     onClick={handleSendSelected}
                     disabled={selectedResults.length === 0}
                     className={`scan-button send ${
@@ -159,6 +234,7 @@ const ScanResults: React.FC<ScanResultsProps> = ({ results, apiBaseUrl }) => {
                     Send Selected
                 </button>
                 <button
+                    type="button"
                     className="scan-button settings"
                     onClick={() => {
                         setShowModal(true);
@@ -168,9 +244,22 @@ const ScanResults: React.FC<ScanResultsProps> = ({ results, apiBaseUrl }) => {
                 </button>
             </div>
 
+            {errorMessage && (
+                <div className="error-banner">
+                    {errorMessage}
+                    <button
+                        type="button"
+                        onClick={() => setErrorMessage(null)}
+                    >
+                        ×
+                    </button>
+                </div>
+            )}
+
             <div className={`modal ${showModal !== undefined ? "show" : ""}`}>
                 <div className="modal-content">
                     <button
+                        type="button"
                         className="modal-close"
                         onClick={() => {
                             setShowModal(undefined);
@@ -178,63 +267,129 @@ const ScanResults: React.FC<ScanResultsProps> = ({ results, apiBaseUrl }) => {
                     >
                         ×
                     </button>
-                    <ScanOptions
-                        onPaperlessInstancesChange={setPaperlessInstances}
-                        onEmailsChange={setEmails}
-                    />
-                    {typeof showModal === "object" && (
-                        <button
-                            onClick={() => {
-                                sendSelected();
-                                setShowModal(undefined);
-                            }}
-                        >
-                            {showModal.name}
-                        </button>
+                    {showModal === true ? (
+                        <SettingsPanel
+                            apiBaseUrl={apiBaseUrl}
+                            settings={settings}
+                            onSaved={setSettings}
+                        />
+                    ) : (
+                        <>
+                            <ScanOptions
+                                availableInstances={(
+                                    settings?.paperlessInstances ?? []
+                                ).map((i) => i.host)}
+                                defaultRecipients={
+                                    settings?.emailRecipients ?? []
+                                }
+                                onPaperlessInstancesChange={
+                                    setPaperlessInstances
+                                }
+                                onEmailsChange={setEmails}
+                            />
+                            {typeof showModal === "object" &&
+                                showModal !== null && (
+                                    <button
+                                        type="button"
+                                        disabled={sending}
+                                        onClick={() => {
+                                            sendSelected();
+                                            setShowModal(undefined);
+                                        }}
+                                    >
+                                        {sending ? "Sending…" : showModal.name}
+                                    </button>
+                                )}
+                        </>
                     )}
                 </div>
             </div>
 
+            {sortedResults.length === 0 && (
+                <p className="empty-state">
+                    No scans yet — place a document on the scanner and press
+                    Scan.
+                </p>
+            )}
+
             <div className="scan-results-grid">
-                {Object.values(results).map((result) => (
-                    <div
-                        key={result.session}
-                        className={`scan-result ${
-                            selectedResults.includes(result.session)
-                                ? "selected"
-                                : ""
-                        }`}
-                        onClick={() => toggleSelection(result.session)}
-                    >
-                        <div className="session-id">
-                            Session: {result.session}
+                {sortedResults.map((result) => {
+                    const selectionIndex = selectedResults.indexOf(
+                        result.session
+                    );
+                    return (
+                        <div
+                            key={result.session}
+                            className={`scan-result ${
+                                selectionIndex >= 0 ? "selected" : ""
+                            }`}
+                            onClick={() => toggleSelection(result.session)}
+                            title={`Session ${result.session}`}
+                        >
+                            {selectionIndex >= 0 && (
+                                <span className="selection-badge">
+                                    {selectionIndex + 1}
+                                </span>
+                            )}
+                            <button
+                                type="button"
+                                className="delete-button"
+                                title="Delete this scan"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    deleteResult(result.session);
+                                }}
+                            >
+                                🗑
+                            </button>
+                            <div className="scan-meta">
+                                {formatCreatedAt(result.createdAt) ||
+                                    result.session.slice(0, 8)}
+                                {result.pages > 0 &&
+                                    ` · ${result.pages} page${
+                                        result.pages > 1 ? "s" : ""
+                                    }`}
+                            </div>
+                            {result.error ? (
+                                <div className="error">{result.error}</div>
+                            ) : (
+                                <>
+                                    <div className="thumbnail-container">
+                                        <img
+                                            src={result.thumbnail}
+                                            alt="Scan thumbnail"
+                                            className="thumbnail"
+                                        />
+                                    </div>
+                                    <div className="scan-links">
+                                        <a
+                                            href={`${result.pdf}?inline=1`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            onClick={(e) =>
+                                                e.stopPropagation()
+                                            }
+                                            className="download-link"
+                                        >
+                                            View
+                                        </a>
+                                        <a
+                                            href={result.pdf}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            onClick={(e) =>
+                                                e.stopPropagation()
+                                            }
+                                            className="download-link"
+                                        >
+                                            Download
+                                        </a>
+                                    </div>
+                                </>
+                            )}
                         </div>
-                        {result.error ? (
-                            <div className="error">{result.error}</div>
-                        ) : (
-                            <>
-                                <div className="thumbnail-container">
-                                    <img
-                                        src={result.thumbnail}
-                                        alt="Scan thumbnail"
-                                        className="thumbnail"
-                                    />
-                                </div>
-                                <div>
-                                    <a
-                                        href={result.pdf}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        onClick={(e) => e.stopPropagation()}
-                                        className="download-link"
-                                    >
-                                        Download
-                                    </a>
-                                </div>
-                            </>
-                        )}
-                    </div>
-                ))}
+                    );
+                })}
             </div>
         </div>
     );

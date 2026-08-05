@@ -7,6 +7,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,14 +17,17 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/robfig/cron/v3"
-	"github.com/sendgrid/sendgrid-go/helpers/mail"
-	"github.com/stapelberg/airscan"
 	"golang.org/x/exp/slices"
 )
 
 var (
-	globalConfig       *Config
-	pdfManager         *PDFManager
+	globalConfig *Config
+	pdfManager   *PDFManager
+
+	// stateMux guards currentScanRequest, scanResults and scannerStatus,
+	// which are mutated from HTTP handlers, the cron job and read by
+	// the broadcast goroutines.
+	stateMux           sync.Mutex
 	currentScanRequest = ScanRequest{
 		PaperlessInstances: []string{},
 	}
@@ -29,6 +35,7 @@ var (
 	scannerStatus = ScannerStatus{
 		Scanning: false,
 	}
+
 	upgrader = websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
 			return true // Be careful with this in production
@@ -39,8 +46,6 @@ var (
 )
 
 func main() {
-	SetupEmail()
-	SetupPaperless()
 	var err error
 	globalConfig, err = SetupScanner()
 	if err != nil {
@@ -50,6 +55,11 @@ func main() {
 	// Initialize the PDFManager
 	pdfManager = NewPDFManager(globalConfig.DataDir)
 
+	LoadSettings()
+	SetupEmail()
+	SetupPaperless()
+	LoadScanResults()
+
 	// Set up cron job
 	c := cron.New()
 	_, err = c.AddFunc("0 2 * * *", dailyTask) // Run every day at 2:00 AM
@@ -58,10 +68,20 @@ func main() {
 	}
 	c.Start()
 
+	// Safety-net broadcast so clients converge even if an update is missed.
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		for range ticker.C {
+			broadcastScanResults()
+			broadcastScannerStatus()
+		}
+	}()
+
 	r := gin.Default()
 	setupRoutes(r, globalConfig, pdfManager)
-	r.Run()
-	log.Printf("Server started on http://0.0.0.0:8080")
+	if err := r.Run(); err != nil {
+		log.Fatalf("server error: %v", err)
+	}
 }
 
 func setupRoutes(r *gin.Engine, cfg *Config, pdfManager *PDFManager) {
@@ -86,11 +106,14 @@ func setupRoutes(r *gin.Engine, cfg *Config, pdfManager *PDFManager) {
 		api.POST("/split", handleSplit(cfg))
 		api.POST("/merge", handleMerge(cfg, pdfManager))
 		api.POST("/send", handleSend(cfg))
+		api.POST("/delete", handleDelete(cfg))
 		api.GET("/scanned/:session/:file", handleScannedFile(cfg))
 		api.GET("/thumbnails/:session", handleThumbnail(cfg))
 		api.GET("/cleanup", handleCleanup)
 		api.PATCH("/scan-request", handlePatchScanRequest)
 		api.GET("/scan-request", handleGetScanRequest)
+		api.GET("/settings", handleGetSettings)
+		api.PATCH("/settings", handlePatchSettings)
 		api.GET("/ws", handleWebSocket)
 	}
 
@@ -109,6 +132,70 @@ func setupRoutes(r *gin.Engine, cfg *Config, pdfManager *PDFManager) {
 	})
 }
 
+// isSafeSession rejects names that could escape the data directory.
+func isSafeSession(session string) bool {
+	return session != "" &&
+		!strings.ContainsAny(session, "/\\") &&
+		!strings.Contains(session, "..")
+}
+
+func snapshotScanResults() []ScanResult {
+	stateMux.Lock()
+	defer stateMux.Unlock()
+	return append([]ScanResult{}, scanResults...)
+}
+
+func addScanResults(results ...ScanResult) {
+	stateMux.Lock()
+	scanResults = append(scanResults, results...)
+	stateMux.Unlock()
+	saveScanResults()
+	broadcastScanResults()
+}
+
+func removeScanResults(sessions []string) {
+	stateMux.Lock()
+	scanResults = slices.DeleteFunc(scanResults, func(r ScanResult) bool {
+		return slices.Contains(sessions, r.Session)
+	})
+	stateMux.Unlock()
+	saveScanResults()
+	broadcastScanResults()
+}
+
+func setScanning(scanning bool) {
+	stateMux.Lock()
+	scannerStatus.Scanning = scanning
+	stateMux.Unlock()
+	broadcastScannerStatus()
+}
+
+func newScanResult(session string) ScanResult {
+	return ScanResult{
+		Session:   session,
+		Error:     "",
+		Thumbnail: fmt.Sprintf("/api/thumbnails/%s", session),
+		PDF:       fmt.Sprintf("/api/scanned/%s/scanned.pdf", session),
+		CreatedAt: time.Now().Format(time.RFC3339),
+		Pages:     countPages(filepath.Join(globalConfig.DataDir, session, "scanned.pdf")),
+	}
+}
+
+func countPages(pdfPath string) int {
+	out, err := exec.Command("pdftk", pdfPath, "dump_data").Output()
+	if err != nil {
+		return 0
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.HasPrefix(line, "NumberOfPages:") {
+			if n, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "NumberOfPages:"))); err == nil {
+				return n
+			}
+		}
+	}
+	return 0
+}
+
 func handleSend(cfg *Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var body struct {
@@ -121,30 +208,66 @@ func handleSend(cfg *Config) gin.HandlerFunc {
 			return
 		}
 		log.Printf("Send request received: %v", body)
+		if len(body.Sessions) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "No sessions provided"})
+			return
+		}
 		if len(body.Recipients) == 0 && len(body.PaperlessInstances) == 0 {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "No recipients or paperless instances provided"})
 			return
 		}
-		for _, recipient := range body.Recipients {
-			for _, session := range body.Sessions {
-				SendEmail([]*mail.Email{mail.NewEmail(recipient, recipient)}, filepath.Join(cfg.DataDir, session, "scanned.pdf"))
+		for _, session := range body.Sessions {
+			if !isSafeSession(session) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid session"})
+				return
 			}
 		}
 		for _, instance := range body.PaperlessInstances {
-			for _, session := range body.Sessions {
-				PostToPaperless("https://"+instance, filepath.Join(cfg.DataDir, session, "scanned.pdf"))
+			if !IsConfiguredPaperlessInstance(instance) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Unknown paperless instance: %s", instance)})
+				return
 			}
 		}
-		// If we've reached here, all sends were successful, so remove the sessions from scan results
-		scanResults = slices.DeleteFunc(scanResults, func(r ScanResult) bool {
-			for _, session := range body.Sessions {
-				if r.Session == session {
-					return true
+
+		failed := map[string][]string{}
+		reasons := []string{}
+		for _, session := range body.Sessions {
+			file := filepath.Join(cfg.DataDir, session, "scanned.pdf")
+			if len(body.Recipients) > 0 {
+				if !SendEmail(body.Recipients, file) {
+					failed[session] = append(failed[session], "email")
+					reasons = append(reasons, "email: send failed")
 				}
 			}
-			return false
-		})
-		c.JSON(http.StatusOK, gin.H{"message": "Send request received"})
+			for _, instance := range body.PaperlessInstances {
+				if err := PostToPaperless(instance, file); err != nil {
+					log.Printf("paperless upload of %s to %s failed: %v", session, instance, err)
+					failed[session] = append(failed[session], instance)
+					reasons = append(reasons, err.Error())
+				}
+			}
+		}
+
+		// Only drop the sessions whose sends all succeeded.
+		succeeded := []string{}
+		for _, session := range body.Sessions {
+			if len(failed[session]) == 0 {
+				succeeded = append(succeeded, session)
+			}
+		}
+		if len(succeeded) > 0 {
+			removeScanResults(succeeded)
+		}
+
+		if len(failed) > 0 {
+			c.JSON(http.StatusBadGateway, gin.H{
+				"error": fmt.Sprintf("%d of %d documents failed to send — %s",
+					len(failed), len(body.Sessions), strings.Join(slices.Compact(reasons), "; ")),
+				"failedSessions": failed,
+			})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "Documents sent"})
 	}
 }
 
@@ -156,6 +279,16 @@ func handleMerge(cfg *Config, pdfManager *PDFManager) gin.HandlerFunc {
 		if err := c.ShouldBindJSON(&body); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
+		}
+		if len(body.Sessions) != 2 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Exactly two sessions are required"})
+			return
+		}
+		for _, session := range body.Sessions {
+			if !isSafeSession(session) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid session"})
+				return
+			}
 		}
 
 		pdf1 := filepath.Join(cfg.DataDir, body.Sessions[0], "scanned.pdf")
@@ -171,9 +304,14 @@ func handleMerge(cfg *Config, pdfManager *PDFManager) gin.HandlerFunc {
 			log.Printf("Error generating thumbnail: %v", err)
 		}
 
-		// Update scan results...
-		updateScanResults(c, session, []string{pdf1, pdf2})
-		c.JSON(http.StatusOK, gin.H{"message": "PDFs merged successfully"})
+		// Remove the source thumbnails; the PDFs were already consumed by Merge.
+		for _, merged := range body.Sessions {
+			os.Remove(filepath.Join(cfg.DataDir, "thumbnails", merged+".jpg"))
+		}
+
+		removeScanResults(body.Sessions)
+		addScanResults(newScanResult(session))
+		c.JSON(http.StatusOK, gin.H{"message": "PDFs merged successfully", "session": session})
 	}
 }
 
@@ -186,40 +324,159 @@ func handleSplit(cfg *Config) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		session := body.Session
-		pdf := filepath.Join(cfg.DataDir, session, "scanned.pdf")
-		log.Printf("Splitting PDF: %s", pdf)
-		session, numFiles, err := splitPDF(cfg.DataDir, pdf)
-		log.Printf("Split PDF: %s into %d files", session, numFiles)
-		appendSession := session
-		for i := 1; i <= numFiles; i++ {
-			appendSession = fmt.Sprintf("%s-%d", session, i)
-			scanResults = append(scanResults, ScanResult{
-				Session:   appendSession,
-				Error:     "",
-				Thumbnail: fmt.Sprintf("/api/thumbnails/%s", appendSession),
-				PDF:       fmt.Sprintf("/api/scanned/%s/scanned.pdf", appendSession),
-			})
+		if !isSafeSession(body.Session) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid session"})
+			return
 		}
+		pdf := filepath.Join(cfg.DataDir, body.Session, "scanned.pdf")
+		log.Printf("Splitting PDF: %s", pdf)
+		sessions, err := splitPDF(cfg.DataDir, pdf)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"session": session})
+		log.Printf("Split PDF into %d files", len(sessions))
+
+		results := []ScanResult{}
+		for _, session := range sessions {
+			if err := generateThumbnail(cfg.DataDir, session, filepath.Join(cfg.DataDir, session, "scanned.pdf")); err != nil {
+				log.Printf("Error generating thumbnail for %s: %v", session, err)
+			}
+			results = append(results, newScanResult(session))
+		}
+		addScanResults(results...)
+		c.JSON(http.StatusOK, gin.H{"sessions": sessions})
+	}
+}
+
+// splitPDF bursts a PDF into pages and turns every page into its own regular
+// session directory (with a scanned.pdf), so split pages can be merged, sent
+// and deleted like any other scan.
+func splitPDF(dataDir string, pdf string) ([]string, error) {
+	absPDF, err := filepath.Abs(pdf)
+	if err != nil {
+		return nil, err
+	}
+
+	tmpDir, err := os.MkdirTemp(dataDir, "split-")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(tmpDir)
+
+	params := []string{
+		fmt.Sprintf("A=%s", absPDF),
+		"burst",
+		"output",
+		filepath.Join(tmpDir, "page-%04d.pdf"),
+	}
+	cmd := exec.Command("pdftk", params...)
+	cmd.Dir = tmpDir // pdftk writes doc_data.txt to its working directory
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("pdftk burst failed: %v", err)
+	}
+
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		return nil, fmt.Errorf("error reading split directory: %v", err)
+	}
+	pages := []string{}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "page-") && strings.HasSuffix(entry.Name(), ".pdf") {
+			pages = append(pages, entry.Name())
+		}
+	}
+	sort.Strings(pages)
+	if len(pages) == 0 {
+		return nil, fmt.Errorf("split produced no pages")
+	}
+
+	base := uuid.NewString()
+	sessions := []string{}
+	for i, page := range pages {
+		session := fmt.Sprintf("%s-%d", base, i+1)
+		sessionDir := filepath.Join(dataDir, session)
+		if err := os.MkdirAll(sessionDir, 0755); err != nil {
+			return nil, err
+		}
+		if err := os.Rename(filepath.Join(tmpDir, page), filepath.Join(sessionDir, "scanned.pdf")); err != nil {
+			return nil, err
+		}
+		sessions = append(sessions, session)
+	}
+	return sessions, nil
+}
+
+func handleDelete(cfg *Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var body struct {
+			Sessions []string `json:"sessions"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if len(body.Sessions) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "No sessions provided"})
+			return
+		}
+		for _, session := range body.Sessions {
+			if !isSafeSession(session) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid session"})
+				return
+			}
+		}
+		for _, session := range body.Sessions {
+			if err := os.RemoveAll(filepath.Join(cfg.DataDir, session)); err != nil {
+				log.Printf("Error deleting session %s: %v", session, err)
+			}
+			os.Remove(filepath.Join(cfg.DataDir, "thumbnails", session+".jpg"))
+		}
+		removeScanResults(body.Sessions)
+		c.JSON(http.StatusOK, gin.H{"message": "Deleted"})
 	}
 }
 
 func handleThumbnail(cfg *Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		session := c.Param("session")
+		if !isSafeSession(session) {
+			c.AbortWithStatus(http.StatusBadRequest)
+			return
+		}
 		filename := filepath.Join(cfg.DataDir, "thumbnails", session+".jpg")
 		c.File(filename)
 	}
 }
 
 func handleCleanup(c *gin.Context) {
-	removeAllFilesOlderThanOneDay()
+	removeExpiredSessions()
 	c.JSON(http.StatusOK, gin.H{"message": "Cleanup complete"})
+}
+
+func handleGetSettings(c *gin.Context) {
+	c.JSON(http.StatusOK, CurrentSettingsRedacted())
+}
+
+func handlePatchSettings(c *gin.Context) {
+	var updates struct {
+		RetentionDays      *int                 `json:"retentionDays"`
+		EmailRecipients    *[]string            `json:"emailRecipients"`
+		PaperlessInstances *[]PaperlessInstance `json:"paperlessInstances"`
+	}
+	if err := c.ShouldBindJSON(&updates); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if updates.RetentionDays != nil && (*updates.RetentionDays < 1 || *updates.RetentionDays > 365) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "retentionDays must be between 1 and 365"})
+		return
+	}
+	if err := UpdateSettings(updates.RetentionDays, updates.EmailRecipients, updates.PaperlessInstances); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, CurrentSettingsRedacted())
 }
 
 func handlePing(c *gin.Context) {
@@ -254,32 +511,35 @@ func handleScan(cfg *Config) gin.HandlerFunc {
 			return
 		}
 
+		for _, instance := range req.PaperlessInstances {
+			if !IsConfiguredPaperlessInstance(instance) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Unknown paperless instance: %s", instance)})
+				return
+			}
+		}
+
 		settings := GetSettings(inputSource)
 		session := req.Session
 		if session == "" {
 			session = uuid.NewString()
-		}
-		broadcastScannerStatus()
-		if err := processScan(cfg, settings, session); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			scannerStatus.Scanning = false
-			broadcastScannerStatus()
+		} else if !isSafeSession(session) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid session"})
 			return
 		}
-		scannerStatus.Scanning = false
-		broadcastScannerStatus()
+
+		setScanning(true)
+		err = Scan(cfg, settings, session, "scanned")
+		setScanning(false)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 
 		if err := generateThumbnail(cfg.DataDir, session, filepath.Join(cfg.DataDir, session, "scanned.pdf")); err != nil {
 			log.Printf("%v", err)
 		}
 
-		scanResults = append(scanResults, ScanResult{
-			Session:   session,
-			Error:     "",
-			Thumbnail: fmt.Sprintf("/api/thumbnails/%s", session),
-			PDF:       fmt.Sprintf("/api/scanned/%s/scanned.pdf", session),
-		})
-		broadcastScanResults()
+		addScanResults(newScanResult(session))
 
 		if req.Duplex && req.Session == "" {
 			c.JSON(http.StatusOK, gin.H{"session": session})
@@ -288,24 +548,23 @@ func handleScan(cfg *Config) gin.HandlerFunc {
 			var emailStatus bool
 			var paperlessStatus string = "not requested"
 
-			tos := []*mail.Email{}
-			for _, recipient := range req.Recipients {
-				tos = append(tos, mail.NewEmail(recipient, recipient))
-			}
-			if len(tos) != 0 {
-				// tos = append(tos, mail.NewEmail("Roger", "owner@example.com"))
-				emailStatus = SendEmail(tos, file)
+			if len(req.Recipients) != 0 {
+				emailStatus = SendEmail(req.Recipients, file)
 			}
 			for _, instance := range req.PaperlessInstances {
-				err := PostToPaperless("https://"+instance, file)
+				err := PostToPaperless(instance, file)
 				if err != nil {
 					paperlessStatus = "error"
 				} else {
 					paperlessStatus = "success"
 				}
 			}
+			scheme := "http"
+			if c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https" {
+				scheme = "https"
+			}
 			c.JSON(http.StatusOK, gin.H{
-				"link":            fmt.Sprintf("http://%s/scanned/%s/scanned.pdf", c.Request.Host, session),
+				"link":            fmt.Sprintf("%s://%s/api/scanned/%s/scanned.pdf", scheme, c.Request.Host, session),
 				"emailStatus":     emailStatus,
 				"paperlessStatus": paperlessStatus,
 			})
@@ -313,67 +572,57 @@ func handleScan(cfg *Config) gin.HandlerFunc {
 	}
 }
 
-func processScan(cfg *Config, settings *airscan.ScanSettings, session string) error {
-	scannerStatus.Scanning = true
-	return Scan(cfg, settings, session, "scanned")
-}
-
 func handleScannedFile(cfg *Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		session := c.Param("session")
-		pdfPath := filepath.Join(cfg.DataDir, session, c.Param("file"))
+		file := c.Param("file")
+		if !isSafeSession(session) || !isSafeSession(file) {
+			c.AbortWithStatus(http.StatusBadRequest)
+			return
+		}
+		pdfPath := filepath.Join(cfg.DataDir, session, file)
 		log.Printf("Serving file: %s", pdfPath)
+		if c.Query("inline") != "" {
+			c.File(pdfPath)
+			return
+		}
 		c.FileAttachment(pdfPath, "scanned.pdf")
 	}
 }
 
-func splitPDF(dataDir string, pdf string) (string, int, error) {
-	session := uuid.NewString()
-
-	os.MkdirAll(filepath.Join(dataDir, session), 0755)
-
-	log.Printf("Splitting PDF: %s", pdf)
-	params := []string{
-		fmt.Sprintf("A=%s", pdf),
-		"burst",
-		"output",
-		fmt.Sprintf("%s/%s/scanned-%%d.pdf", dataDir, session),
-	}
-	log.Printf("pdftk params: %v", params)
-	cmd := exec.Command("pdftk", params...)
-	err := cmd.Run()
-	if err != nil {
-		return "", 0, err
-	}
-	// Count number of files in session directory
-	files, err := os.ReadDir(filepath.Join(dataDir, session))
-	if err != nil {
-		return "", 0, fmt.Errorf("error reading session directory: %v", err)
-	}
-	numFiles := len(files)
-	log.Printf("Split PDF: %s into %d files.", session, numFiles)
-	return session, numFiles, nil
-}
-
 func dailyTask() {
 	log.Println("Running daily task...")
-	removeAllFilesOlderThanOneDay()
-	scanResults = []ScanResult{}
-	broadcastScanResults()
+	removeExpiredSessions()
 	broadcastScannerStatus()
 }
 
-func removeAllFilesOlderThanOneDay() {
+func removeExpiredSessions() {
+	cutoff := time.Now().AddDate(0, 0, -CurrentSettings().RetentionDays)
 	files, err := os.ReadDir(globalConfig.DataDir)
 	if err != nil {
 		log.Printf("Error reading data dir: %v", err)
 		return
 	}
+	removed := []string{}
 	for _, file := range files {
-		if file.IsDir() {
-			sessionDir := filepath.Join(globalConfig.DataDir, file.Name())
-			os.RemoveAll(sessionDir)
+		if !file.IsDir() || file.Name() == "thumbnails" {
+			continue
 		}
+		info, err := file.Info()
+		if err != nil || info.ModTime().After(cutoff) {
+			continue
+		}
+		sessionDir := filepath.Join(globalConfig.DataDir, file.Name())
+		if err := os.RemoveAll(sessionDir); err != nil {
+			log.Printf("Error removing session dir %s: %v", sessionDir, err)
+			continue
+		}
+		os.Remove(filepath.Join(globalConfig.DataDir, "thumbnails", file.Name()+".jpg"))
+		removed = append(removed, file.Name())
+	}
+	if len(removed) > 0 {
+		log.Printf("Removed %d expired sessions", len(removed))
+		removeScanResults(removed)
 	}
 }
 
@@ -384,6 +633,7 @@ func handlePatchScanRequest(c *gin.Context) {
 		return
 	}
 
+	stateMux.Lock()
 	if updates.InputSource != "" {
 		currentScanRequest.InputSource = updates.InputSource
 	}
@@ -395,15 +645,19 @@ func handlePatchScanRequest(c *gin.Context) {
 	}
 	currentScanRequest.Duplex = updates.Duplex
 	currentScanRequest.PaperlessInstances = updates.PaperlessInstances
+	response := currentScanRequest
+	stateMux.Unlock()
 
-	// After updating currentScanRequest, broadcast the changes
-	go broadcastScanRequest()
+	broadcastScanRequest()
 
-	c.JSON(http.StatusOK, currentScanRequest)
+	c.JSON(http.StatusOK, response)
 }
 
 func handleGetScanRequest(c *gin.Context) {
-	c.JSON(http.StatusOK, currentScanRequest)
+	stateMux.Lock()
+	response := currentScanRequest
+	stateMux.Unlock()
+	c.JSON(http.StatusOK, response)
 }
 
 func handleWebSocket(c *gin.Context) {
@@ -413,6 +667,20 @@ func handleWebSocket(c *gin.Context) {
 		return
 	}
 	defer conn.Close()
+
+	// Send initial state before registering the client, so these writes
+	// cannot race with broadcast writes.
+	stateMux.Lock()
+	req := currentScanRequest
+	results := append([]ScanResult{}, scanResults...)
+	status := scannerStatus
+	stateMux.Unlock()
+	if err := conn.WriteJSON(BroadcastData{Type: "scanRequest", ScanRequest: &req}); err != nil {
+		log.Printf("Failed to send initial state: %v", err)
+		return
+	}
+	conn.WriteJSON(BroadcastData{Type: "scanResult", ScanResults: results})
+	conn.WriteJSON(BroadcastData{Type: "scannerStatus", ScannerStatus: &status})
 
 	clientsMux.Lock()
 	clients[conn] = true
@@ -425,28 +693,6 @@ func handleWebSocket(c *gin.Context) {
 		clientsMux.Unlock()
 	}()
 
-	// Send initial state
-	if err := conn.WriteJSON(currentScanRequest); err != nil {
-		log.Printf("Failed to send initial state: %v", err)
-		return
-	}
-
-	go broadcastScanRequest()
-	go broadcastScanResults()
-	go broadcastScannerStatus()
-
-	// Start a ticker to periodically broadcast data
-	ticker := time.NewTicker(1500 * time.Millisecond)
-	defer ticker.Stop()
-
-	go func() {
-		for range ticker.C {
-			// broadcastScanRequest()
-			broadcastScanResults()
-			broadcastScannerStatus()
-		}
-	}()
-
 	// Keep connection alive
 	for {
 		// Read messages (required to keep connection alive)
@@ -457,55 +703,35 @@ func handleWebSocket(c *gin.Context) {
 	}
 }
 
-func broadcastScanRequest() {
+func broadcast(data BroadcastData) {
 	clientsMux.Lock()
 	defer clientsMux.Unlock()
 
 	for client := range clients {
-		err := client.WriteJSON(BroadcastData{
-			Type:        "scanRequest",
-			ScanRequest: &currentScanRequest,
-		})
-		if err != nil {
+		if err := client.WriteJSON(data); err != nil {
 			log.Printf("Failed to send to client: %v", err)
 			client.Close()
 			delete(clients, client)
 		}
 	}
+}
+
+func broadcastScanRequest() {
+	stateMux.Lock()
+	req := currentScanRequest
+	stateMux.Unlock()
+	broadcast(BroadcastData{Type: "scanRequest", ScanRequest: &req})
 }
 
 func broadcastScanResults() {
-	clientsMux.Lock()
-	defer clientsMux.Unlock()
-
-	for client := range clients {
-		err := client.WriteJSON(BroadcastData{
-			Type:        "scanResult",
-			ScanResults: scanResults,
-		})
-		if err != nil {
-			log.Printf("Failed to send to client: %v", err)
-			client.Close()
-			delete(clients, client)
-		}
-	}
+	broadcast(BroadcastData{Type: "scanResult", ScanResults: snapshotScanResults()})
 }
 
 func broadcastScannerStatus() {
-	clientsMux.Lock()
-	defer clientsMux.Unlock()
-
-	for client := range clients {
-		err := client.WriteJSON(BroadcastData{
-			Type:          "scannerStatus",
-			ScannerStatus: &scannerStatus,
-		})
-		if err != nil {
-			log.Printf("Failed to send to client: %v", err)
-			client.Close()
-			delete(clients, client)
-		}
-	}
+	stateMux.Lock()
+	status := scannerStatus
+	stateMux.Unlock()
+	broadcast(BroadcastData{Type: "scannerStatus", ScannerStatus: &status})
 }
 
 func generateThumbnail(dataDir string, session string, pdfPath string) error {
@@ -516,9 +742,6 @@ func generateThumbnail(dataDir string, session string, pdfPath string) error {
 	}
 
 	thumbnailPath := filepath.Join(thumbnailDir, session+".jpg")
-
-	log.Printf("pdfPath: %s", pdfPath)
-	log.Printf("thumbnailPath: %s", thumbnailPath)
 
 	cmd := exec.Command(
 		"convert",
@@ -534,27 +757,4 @@ func generateThumbnail(dataDir string, session string, pdfPath string) error {
 	}
 
 	return nil
-}
-
-func updateScanResults(c *gin.Context, newSession string, mergedSessions []string) {
-	// Remove the merged sessions from the results array
-	scanResults = slices.DeleteFunc(scanResults, func(r ScanResult) bool {
-		for _, session := range mergedSessions {
-			if r.Session == session {
-				return true
-			}
-		}
-		return false
-	})
-
-	// Add the new merged result
-	scanResults = append(scanResults, ScanResult{
-		Session:   newSession,
-		Error:     "",
-		Thumbnail: fmt.Sprintf("/api/thumbnails/%s", newSession),
-		PDF:       fmt.Sprintf("/api/scanned/%s/scanned.pdf", newSession),
-	})
-
-	// Broadcast the updated results
-	broadcastScanResults()
 }

@@ -5,13 +5,12 @@ go 1.23.0
 require (
 	github.com/gin-gonic/gin v1.10.0
 	github.com/google/renameio/v2 v2.0.0
-	github.com/sendgrid/sendgrid-go v3.16.0+incompatible
+	github.com/resend/resend-go/v2 v2.28.0
 	github.com/stapelberg/airscan v0.0.0-20230413182642-6d2d07701710
 )
 
 require (
 	github.com/brutella/dnssd v1.2.5 // indirect
-	github.com/sendgrid/rest v2.6.9+incompatible // indirect
 	golang.org/x/sync v0.9.0 // indirect
 )
 

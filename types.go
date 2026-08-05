@@ -25,6 +25,8 @@ type ScanResult struct {
 	Error     string `json:"error"`
 	Thumbnail string `json:"thumbnail"`
 	PDF       string `json:"pdf"`
+	CreatedAt string `json:"createdAt"`
+	Pages     int    `json:"pages"`
 }
 
 type BroadcastData struct {

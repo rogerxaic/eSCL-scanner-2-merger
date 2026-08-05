@@ -1,5 +1,5 @@
 import React from 'react';
-import { ScannerStatus } from '../types'; // You'll need to adjust this import based on your types location
+import { ScannerStatus } from '../types';
 
 interface StatusBarProps {
     ws: WebSocket | null;
@@ -19,9 +19,9 @@ export const StatusBar: React.FC<StatusBarProps> = ({ ws, scannerStatus }) => {
         >
             {ws
                 ? scannerStatus?.scanning
-                    ? "Scanning..."
-                    : "Connected to scanner"
-                : "Not connected to scanner"}
+                    ? "Scanning…"
+                    : "Ready"
+                : "Disconnected — reconnecting…"}
         </div>
     );
-}; 
+};

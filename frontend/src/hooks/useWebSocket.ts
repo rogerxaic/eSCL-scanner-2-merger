@@ -18,8 +18,11 @@ export function useWebSocket({host, secure}: {host: string, secure: boolean}): W
   });
 
   useEffect(() => {
+    let cancelled = false;
+    let websocket: WebSocket;
+
     const connectWebSocket = () => {
-      const websocket = new WebSocket(`${secure ? "wss" : "ws"}://${host}/api/ws`);
+      websocket = new WebSocket(`${secure ? "wss" : "ws"}://${host}/api/ws`);
 
       websocket.onopen = () => {
         console.log("Connected to websocket");
@@ -30,7 +33,7 @@ export function useWebSocket({host, secure}: {host: string, secure: boolean}): W
         const data = JSON.parse(event.data) as BroadcastData;
         setState(prev => {
           const newState = { ...prev };
-          
+
           if (data.type === "scanRequest" && data.scanRequest) {
             newState.scanRequest = {
               ...data.scanRequest,
@@ -38,15 +41,15 @@ export function useWebSocket({host, secure}: {host: string, secure: boolean}): W
               inputSource: data.scanRequest.inputSource || "Auto",
             };
           } else if (data.type === "scanResult") {
-            const res = { ...prev.scanResults };
-            (data.scanResults ?? []).forEach((scanResult) => {
-              res[scanResult.session] = scanResult;
-            });
-            newState.scanResults = res;
+            // The server always sends the complete list, so replace the
+            // map wholesale — merging would keep deleted sessions forever.
+            newState.scanResults = Object.fromEntries(
+              (data.scanResults ?? []).map((r) => [r.session, r])
+            );
           } else if (data.type === "scannerStatus") {
             newState.scannerStatus = data.scannerStatus!;
           }
-          
+
           return newState;
         });
       };
@@ -57,16 +60,20 @@ export function useWebSocket({host, secure}: {host: string, secure: boolean}): W
 
       websocket.onclose = () => {
         console.log("Disconnected from websocket");
+        if (cancelled) return;
         setState(prev => ({ ...prev, ws: null }));
-        setTimeout(connectWebSocket, 1500);
+        setTimeout(() => {
+          if (!cancelled) connectWebSocket();
+        }, 1500);
       };
-
-      return websocket;
     };
 
-    const websocket = connectWebSocket();
-    return () => websocket.close();
-  }, []);
+    connectWebSocket();
+    return () => {
+      cancelled = true;
+      websocket.close();
+    };
+  }, [host, secure]);
 
   return state;
 }

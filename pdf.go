@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,36 +19,6 @@ func NewPDFManager(dataDir string) *PDFManager {
 	}
 }
 
-func (pm *PDFManager) Split(pdfPath string) (string, int, error) {
-	session := uuid.NewString()
-	sessionDir := filepath.Join(pm.dataDir, session)
-
-	if err := os.MkdirAll(sessionDir, 0755); err != nil {
-		return "", 0, fmt.Errorf("failed to create session directory: %v", err)
-	}
-
-	log.Printf("Splitting PDF: %s", pdfPath)
-	params := []string{
-		fmt.Sprintf("A=%s", pdfPath),
-		"burst",
-		"output",
-		filepath.Join(sessionDir, "scanned-%d.pdf"),
-	}
-
-	cmd := exec.Command("pdftk", params...)
-	if err := cmd.Run(); err != nil {
-		return "", 0, fmt.Errorf("failed to split PDF: %v", err)
-	}
-
-	files, err := os.ReadDir(sessionDir)
-	if err != nil {
-		return "", 0, fmt.Errorf("error reading session directory: %v", err)
-	}
-
-	numFiles := len(files)
-	log.Printf("Split PDF: %s into %d files", session, numFiles)
-	return session, numFiles, nil
-}
 
 func (pm *PDFManager) Merge(path1, path2 string) (outputPath string, session string, err error) {
 	session = uuid.NewString()

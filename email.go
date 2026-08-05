@@ -1,79 +1,63 @@
 package main
 
 import (
-	"encoding/base64"
 	"fmt"
 	"log"
 	"os"
 	"time"
 
-	"github.com/sendgrid/sendgrid-go"
-	"github.com/sendgrid/sendgrid-go/helpers/mail"
+	"github.com/resend/resend-go/v2"
 )
 
-func getClient() *sendgrid.Client {
-	apiKey := os.Getenv("SENDGRID_API_KEY")
-	if apiKey == "" {
-		log.Fatal("SENDGRID_API_KEY is not set")
-		return nil
-	}
-
-	return sendgrid.NewSendClient(apiKey)
-}
-
 func SetupEmail() {
-	apiKey := os.Getenv("SENDGRID_API_KEY")
-	if apiKey == "" {
-		log.Fatal("SENDGRID_API_KEY is not set")
+	if os.Getenv("RESEND_API_KEY") == "" {
+		log.Print("warning: RESEND_API_KEY is not set, email sending disabled")
 	}
 }
 
-func SendEmail(tos []*mail.Email, file string) bool {
+func SendEmail(recipients []string, file string) bool {
+	apiKey := os.Getenv("RESEND_API_KEY")
+	if apiKey == "" {
+		log.Print("RESEND_API_KEY is not set, cannot send email")
+		return false
+	}
+
 	fileContent, err := os.ReadFile(file)
 	if err != nil {
 		log.Printf("error: %v", err)
 		return false
 	}
 
-	client := getClient()
-	if client == nil {
-		return false
-	}
+	client := resend.NewClient(apiKey)
 
 	now := time.Now()
 	fileName := now.Local().Format("2006.01.02-15.04") + "-scan.pdf"
 
-	m := mail.NewV3Mail()
-	m.SetFrom(mail.NewEmail("Scan", "scanner@example.com"))
-	m.Subject = "Scan"
-	c := mail.NewContent("text/plain", fmt.Sprintf("Scanned file on %s. Please find the attached file '%s'.", now.Local().Format("2 Jan 2006 at 15:04"), fileName))
-	m.AddContent(c)
-
-	p := mail.NewPersonalization()
-	p.AddTos(tos...)
-	m.AddPersonalizations(p)
-
-	a := mail.NewAttachment()
-	encoded := base64.StdEncoding.EncodeToString(fileContent)
-	a.SetContent(encoded)
-	a.SetType("application/pdf")
-	a.SetFilename(fileName)
-	a.SetDisposition("attachment")
-	m.AddAttachment(a)
+	from := os.Getenv("EMAIL_FROM")
+	if from == "" {
+		from = "Scan <scanner@example.com>"
+	}
 
 	log.Println("sending email")
-	response, err := client.Send(m)
+	sent, err := client.Emails.Send(&resend.SendEmailRequest{
+		From:    from,
+		To:      recipients,
+		Subject: "Scan",
+		Text: fmt.Sprintf(
+			"Scanned file on %s. Please find the attached file '%s'.",
+			now.Local().Format("2 Jan 2006 at 15:04"),
+			fileName,
+		),
+		Attachments: []*resend.Attachment{{
+			Content:     fileContent,
+			Filename:    fileName,
+			ContentType: "application/pdf",
+		}},
+	})
 	if err != nil {
-		log.Println(err)
+		log.Printf("error sending email: %v", err)
 		return false
-	} else {
-		if response.StatusCode != 202 && response.StatusCode != 200 {
-			log.Println(response.StatusCode)
-			log.Println(response.Body)
-			log.Println(response.Headers)
-			return false
-		}
 	}
-	log.Println("email sent")
+	log.Printf("email sent: %s", sent.Id)
 	return true
 }

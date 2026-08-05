@@ -35,7 +35,7 @@ export function InputSourceSelector({ onScan, disabled }: InputSourceSelectorPro
                         </span>
                     </div>
                 ))}
-                <button onClick={() => onScan(selectedSource)} disabled={disabled}>Scan</button>
+                <button type="button" onClick={() => onScan(selectedSource)} disabled={disabled}>Scan</button>
             </div>
             <style>{`
                 .input-source-container {
