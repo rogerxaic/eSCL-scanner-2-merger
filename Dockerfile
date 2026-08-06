@@ -30,6 +30,8 @@ RUN go build -o scanner .
 
 FROM ubuntu:24.04
 
+LABEL org.opencontainers.image.source="https://github.com/rogerxaic/eSCL-scanner-2-merger"
+
 WORKDIR /app
 
 RUN apt update && \
