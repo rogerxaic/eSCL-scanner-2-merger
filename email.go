@@ -35,7 +35,8 @@ func SendEmail(recipients []string, file string) bool {
 
 	from := os.Getenv("EMAIL_FROM")
 	if from == "" {
-		from = "Scan <scanner@example.com>"
+		log.Print("EMAIL_FROM is not set, cannot send email (e.g. \"Scanner <scan@example.com>\", the domain must be verified in Resend)")
+		return false
 	}
 
 	log.Println("sending email")

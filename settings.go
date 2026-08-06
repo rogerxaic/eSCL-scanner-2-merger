@@ -32,12 +32,9 @@ var (
 
 func defaultSettings() Settings {
 	return Settings{
-		RetentionDays:   1,
-		EmailRecipients: []string{"scanner@example.com", "user@example.com"},
-		PaperlessInstances: []PaperlessInstance{
-			{Host: "papers-a.example.com"},
-			{Host: "papers-b.example.com"},
-		},
+		RetentionDays:      1,
+		EmailRecipients:    []string{},
+		PaperlessInstances: []PaperlessInstance{},
 	}
 }
 

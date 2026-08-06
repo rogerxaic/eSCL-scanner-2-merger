@@ -1,0 +1,6 @@
+# go build output (module is named "example")
+/example
+/scanner
+
+.DS_Store
+.claude/

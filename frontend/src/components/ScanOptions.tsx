@@ -1,11 +1,6 @@
 import React, { useEffect, useState } from "react";
 import "./ScanOptions.css";
 
-const INSTANCE_LABELS: { [host: string]: string } = {
-    "papers-a.example.com": "Paperless (home)",
-    "papers-b.example.com": "Paperless (site-b)",
-};
-
 interface ScanOptionsProps {
     availableInstances: string[];
     defaultRecipients: string[];
@@ -65,7 +60,7 @@ export function ScanOptions({
                             )
                         }
                     />
-                    {INSTANCE_LABELS[instance] ?? instance}
+                    {instance}
                 </label>
             ))}
             {defaultRecipients.map((recipient) => (

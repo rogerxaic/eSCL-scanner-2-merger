@@ -20,7 +20,7 @@
     {
       "label": "Docker run dev",
       "type": "shell",
-      "command": "docker run -it --rm -p 8080:8080 --mount type=volume,source=scanner-data,target=/scans/ go-scanner:dev -host=1.2.3.4 -dataDir=/scans",
+      "command": "docker run -it --rm -p 8080:8080 --mount type=volume,source=scanner-data,target=/scans/ go-scanner:dev -host=<scanner-ip> -dataDir=/scans",
       "group": {
         "kind": "none",
         "isDefault": true
