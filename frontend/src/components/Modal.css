@@ -18,11 +18,13 @@
 .modal-content {
     background-color: white;
     padding: 2rem;
-    border-radius: 8px;
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
     position: relative;
-    max-width: 80%;
-    max-height: 80%;
+    width: min(520px, 92vw);
+    max-height: 85vh;
     overflow-y: auto;
+    box-sizing: border-box;
 }
 
 .modal-close {

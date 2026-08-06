@@ -189,53 +189,44 @@ const ScanResults: React.FC<ScanResultsProps> = ({ results, apiBaseUrl }) => {
 
     return (
         <div className="scan-results">
-            <div style={{ marginBottom: "1rem" }}>
+            <div className="action-bar">
                 <button
                     type="button"
-                    onClick={mergePDFs}
-                    disabled={selectedResults.length !== 2}
-                    className={`scan-button merge ${
-                        selectedResults.length !== 2 ? "disabled" : ""
-                    }`}
-                    title="Interleaves the two selected PDFs: pages of the first, then the second in reverse (recto/verso)"
-                >
-                    Combine duplex ({selectedResults.length}/2)
-                </button>
-
-                <button
-                    type="button"
+                    className="btn btn--secondary"
                     onClick={splitPDF}
                     disabled={selectedResults.length !== 1}
-                    className={`scan-button split ${
-                        selectedResults.length !== 1 ? "disabled" : ""
-                    }`}
                 >
-                    Split PDF
+                    Split Selected Pages
                 </button>
-
                 <button
                     type="button"
+                    className="btn btn--secondary"
+                    onClick={mergePDFs}
+                    disabled={selectedResults.length !== 2}
+                    title="Interleaves the two selected PDFs: pages of the first, then the second in reverse (recto/verso)"
+                >
+                    Combine Selected Duplex Pages ({selectedResults.length}/2)
+                </button>
+                <button
+                    type="button"
+                    className="btn btn--secondary"
                     onClick={() => setSelectedResults([])}
                     disabled={selectedResults.length === 0}
-                    className={`scan-button clear ${
-                        selectedResults.length === 0 ? "disabled" : ""
-                    }`}
                 >
                     Clear Selection
                 </button>
                 <button
                     type="button"
+                    className="btn btn--secondary"
                     onClick={handleSendSelected}
                     disabled={selectedResults.length === 0}
-                    className={`scan-button send ${
-                        selectedResults.length === 0 ? "disabled" : ""
-                    }`}
                 >
                     Send Selected
                 </button>
                 <button
                     type="button"
-                    className="scan-button settings"
+                    className="btn btn--secondary btn--icon"
+                    aria-label="Settings"
                     onClick={() => {
                         setShowModal(true);
                     }}
@@ -291,6 +282,7 @@ const ScanResults: React.FC<ScanResultsProps> = ({ results, apiBaseUrl }) => {
                                 showModal !== null && (
                                     <button
                                         type="button"
+                                        className="btn btn--primary modal-send"
                                         disabled={sending}
                                         onClick={() => {
                                             sendSelected();
@@ -331,24 +323,36 @@ const ScanResults: React.FC<ScanResultsProps> = ({ results, apiBaseUrl }) => {
                                     {selectionIndex + 1}
                                 </span>
                             )}
-                            <button
-                                type="button"
-                                className="delete-button"
-                                title="Delete this scan"
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    deleteResult(result.session);
-                                }}
-                            >
-                                🗑
-                            </button>
-                            <div className="scan-meta">
-                                {formatCreatedAt(result.createdAt) ||
-                                    result.session.slice(0, 8)}
-                                {result.pages > 0 &&
-                                    ` · ${result.pages} page${
-                                        result.pages > 1 ? "s" : ""
-                                    }`}
+                            <div className="card-header">
+                                <input
+                                    type="checkbox"
+                                    className="card-checkbox"
+                                    checked={selectionIndex >= 0}
+                                    aria-label="Select scan"
+                                    onClick={(e) => e.stopPropagation()}
+                                    onChange={() =>
+                                        toggleSelection(result.session)
+                                    }
+                                />
+                                <span className="scan-meta">
+                                    {formatCreatedAt(result.createdAt) ||
+                                        result.session.slice(0, 8)}
+                                    {result.pages > 0 &&
+                                        ` · ${result.pages} page${
+                                            result.pages > 1 ? "s" : ""
+                                        }`}
+                                </span>
+                                <button
+                                    type="button"
+                                    className="delete-button"
+                                    title="Delete this scan"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        deleteResult(result.session);
+                                    }}
+                                >
+                                    🗑
+                                </button>
                             </div>
                             {result.error ? (
                                 <div className="error">{result.error}</div>

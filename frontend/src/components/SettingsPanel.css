@@ -35,7 +35,7 @@
 .settings-row button,
 .settings-instance button {
     padding: 0.5rem 1rem;
-    background-color: #0066cc;
+    background-color: var(--color-primary);
     color: white;
     border: none;
     border-radius: 4px;
@@ -59,7 +59,7 @@
 }
 
 .settings-instance button {
-    background-color: #dc3545;
+    background-color: var(--color-danger);
 }
 
 .settings-hint {
@@ -83,7 +83,7 @@
 
 .settings-instance-form .settings-instance-header button {
     padding: 0.25rem 0.75rem;
-    background-color: #dc3545;
+    background-color: var(--color-danger);
     color: white;
     border: none;
     border-radius: 4px;
