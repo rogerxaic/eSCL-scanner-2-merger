@@ -1,0 +1,16 @@
+.git
+.github
+.vscode
+.idea
+.claude
+.DS_Store
+
+README.md
+bruno
+
+/example
+/scanner
+
+node_modules
+frontend/node_modules
+frontend/build
