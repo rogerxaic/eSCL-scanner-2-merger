@@ -56,6 +56,7 @@ jobs:
             type=sha,format=long
 
       - name: Build (and push on main)
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -65,3 +66,86 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # The compose file in nomad_gitops pins tag AND digest. Nothing else
+      # moves that pin, so without the steps below a build reaches the
+      # registry and stops there.
+
+      - name: Check out gitops
+        if: github.event_name == 'push'
+        uses: actions/checkout@v4
+        with:
+          repository: rogerxaic/nomad_gitops
+          ref: main
+          ssh-key: ${{ secrets.GITOPS_DEPLOY_KEY }}
+          path: gitops
+
+      - name: Pin the new image
+        if: github.event_name == 'push'
+        working-directory: gitops
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          FILE=komodo/stacks/jdli-pi/escl-scanner/compose.yaml
+          NEW="ghcr.io/rogerxaic/escl-scanner-2-merger:sha-${GITHUB_SHA}@${DIGEST}"
+
+          # Anchored on the `scanner` service's image line. `bridge` above it is
+          # built by hand, exists in no registry, and must not be touched.
+          python3 - "$FILE" "$NEW" <<'PY'
+          import re, sys
+          path, new = sys.argv[1], sys.argv[2]
+          src = open(path).read()
+          pat = re.compile(r'(?<=^    image: )ghcr\.io/rogerxaic/escl-scanner-2-merger:\S+$', re.M)
+          out, n = pat.subn(new, src)
+          if n != 1:
+              sys.exit(f"expected exactly 1 scanner image line, found {n}")
+          open(path, "w").write(out)
+          PY
+
+          git config user.name  "scanner-ci"
+          git config user.email "scanner-ci@users.noreply.github.com"
+          git add "$FILE"
+          if git diff --cached --quiet; then
+            echo "digest unchanged, nothing to commit"
+          else
+            git commit -m "scanner: ${GITHUB_SHA:0:7}"
+            git push origin main
+          fi
+
+      # The Komodo core binds 100.73.18.58:9120 on the tailnet only, so the
+      # runner has to join it. `tag:ci` is granted that port in the policy file.
+
+      - name: Join the tailnet
+        if: github.event_name == 'push'
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Deploy
+        if: github.event_name == 'push'
+        env:
+          KEY: ${{ secrets.KOMODO_KEY }}
+          SECRET: ${{ secrets.KOMODO_SECRET }}
+        run: |
+          set -euo pipefail
+          curl -sS --fail-with-body --max-time 600 \
+            -X POST http://100.73.18.58:9120/execute \
+            -H "X-Api-Key: $KEY" -H "X-Api-Secret: $SECRET" \
+            -H "Content-Type: application/json" \
+            -d '{"type":"DeployStack","params":{"stack":"cat_xaic_nice_scanner"}}' \
+            > update.json
+
+          # Komodo answers 200 with the update record even when the deploy
+          # itself failed, so the job has to read `success` and exit on it.
+          python3 - update.json <<'PY'
+          import json, sys
+          u = json.load(open(sys.argv[1]))
+          print(u.get("operation"), u.get("status"), "success:", u.get("success"))
+          for log in u.get("logs", []):
+              print("---", log.get("stage"))
+              print((log.get("stderr") or log.get("stdout") or "").strip()[:2000])
+          sys.exit(0 if u.get("success") else 1)
+          PY
