@@ -113,8 +113,10 @@ jobs:
             git push origin main
           fi
 
-      # The Komodo core binds 100.73.18.58:9120 on the tailnet only, so the
-      # runner has to join it. `tag:ci` is granted that port in the policy file.
+      # The Komodo core binds port 9120 on the tailnet only, so the runner has
+      # to join it. `tag:ci` is granted that port in the policy file. The
+      # address is the KOMODO_URL repository variable, not a constant here:
+      # the core moved once already, on 2026-08-15.
 
       - name: Join the tailnet
         if: github.event_name == 'push'
@@ -129,10 +131,20 @@ jobs:
         env:
           KEY: ${{ secrets.KOMODO_KEY }}
           SECRET: ${{ secrets.KOMODO_SECRET }}
+          # Set the KOMODO_URL repository variable when the core moves. The
+          # literal below is only the fallback if that variable is unset.
+          KOMODO_URL: ${{ vars.KOMODO_URL || 'http://100.115.184.114:9120' }}
+          KOMODO_URL_IS_SET: ${{ vars.KOMODO_URL != '' }}
         run: |
           set -euo pipefail
+          if [ "$KOMODO_URL_IS_SET" = "true" ]; then
+            echo "Komodo core $KOMODO_URL (from the KOMODO_URL variable)"
+          else
+            echo "::warning::KOMODO_URL is unset. The job uses the built-in default $KOMODO_URL, which goes stale when the core moves."
+          fi
+
           curl -sS --fail-with-body --max-time 600 \
-            -X POST http://100.73.18.58:9120/execute \
+            -X POST "$KOMODO_URL/execute" \
             -H "X-Api-Key: $KEY" -H "X-Api-Secret: $SECRET" \
             -H "Content-Type: application/json" \
             -d '{"type":"DeployStack","params":{"stack":"cat_xaic_nice_scanner"}}' \
