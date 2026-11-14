@@ -5,6 +5,7 @@ export interface ScanRequest {
     session: string;
     recipients: string[];
     paperlessInstances: string[];
+    odooCompanies?: number[];
 }
 
 export interface ScanResult {
@@ -31,10 +32,26 @@ export interface PaperlessInstance {
     hasToken?: boolean;
 }
 
+export interface OdooCompany {
+    id: number;
+    name: string;
+}
+
+export interface OdooConfig {
+    url: string;
+    database: string;
+    // Like the paperless secrets: never returned, blank keeps the stored key.
+    apiKey: string;
+    hasApiKey?: boolean;
+    confidentiality: string;
+    companies: OdooCompany[];
+}
+
 export interface Settings {
     retentionDays: number;
     emailRecipients: string[];
     paperlessInstances: PaperlessInstance[];
+    odoo: OdooConfig;
 }
 
 export interface BroadcastData {

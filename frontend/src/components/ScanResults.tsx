@@ -29,6 +29,7 @@ const ScanResults: React.FC<ScanResultsProps> = ({ results, apiBaseUrl }) => {
     const [paperlessInstances, setPaperlessInstances] = React.useState<
         string[]
     >([]);
+    const [odooCompanies, setOdooCompanies] = React.useState<number[]>([]);
 
     const [settings, setSettings] = React.useState<Settings | null>(null);
     const [errorMessage, setErrorMessage] = React.useState<string | null>(
@@ -166,6 +167,7 @@ const ScanResults: React.FC<ScanResultsProps> = ({ results, apiBaseUrl }) => {
                     sessions: selectedResults,
                     recipients: emails,
                     paperlessInstances,
+                    odooCompanies,
                 }),
             });
 
@@ -270,6 +272,12 @@ const ScanResults: React.FC<ScanResultsProps> = ({ results, apiBaseUrl }) => {
                                 availableInstances={(
                                     settings?.paperlessInstances ?? []
                                 ).map((i) => i.host)}
+                                availableOdooCompanies={
+                                    settings?.odoo?.url
+                                        ? settings.odoo.companies ?? []
+                                        : []
+                                }
+                                onOdooCompaniesChange={setOdooCompanies}
                                 defaultRecipients={
                                     settings?.emailRecipients ?? []
                                 }

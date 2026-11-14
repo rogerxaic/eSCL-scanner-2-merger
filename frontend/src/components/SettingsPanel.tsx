@@ -1,5 +1,13 @@
 import React, { useEffect, useState } from "react";
-import { PaperlessInstance, Settings } from "../types";
+import { OdooConfig, PaperlessInstance, Settings } from "../types";
+
+const emptyOdoo: OdooConfig = {
+    url: "",
+    database: "",
+    apiKey: "",
+    confidentiality: "internal",
+    companies: [],
+};
 import "./SettingsPanel.css";
 
 interface SettingsPanelProps {
@@ -23,6 +31,8 @@ export function SettingsPanel({
         password: "",
         token: "",
     });
+    const [odoo, setOdoo] = useState<OdooConfig>(emptyOdoo);
+    const [odooLoad, setOdooLoad] = useState<string | null>(null);
     const [status, setStatus] = useState<
         "idle" | "saving" | "saved" | "error"
     >("idle");
@@ -32,6 +42,7 @@ export function SettingsPanel({
             setDays(String(settings.retentionDays));
             setEmails(settings.emailRecipients);
             setInstances(settings.paperlessInstances);
+            setOdoo({ ...emptyOdoo, ...(settings.odoo ?? {}), apiKey: "" });
         }
     }, [settings]);
 
@@ -68,6 +79,31 @@ export function SettingsPanel({
         setStatus("idle");
     };
 
+    const updateOdoo = (changes: Partial<OdooConfig>) => {
+        setOdoo({ ...odoo, ...changes });
+        setStatus("idle");
+    };
+
+    // Reads the companies with the key that is saved on the server, so save
+    // the URL and key first.
+    const loadOdooCompanies = async () => {
+        setOdooLoad("Loading…");
+        try {
+            const response = await fetch(`${apiBaseUrl}/api/odoo/companies`);
+            const body = await response.json();
+            if (!response.ok) {
+                setOdooLoad(body.error ?? `HTTP ${response.status}`);
+                return;
+            }
+            updateOdoo({ companies: body });
+            setOdooLoad(
+                `${body.length} companies loaded. Remove the ones you do not want, then save.`
+            );
+        } catch (error) {
+            setOdooLoad("Network error");
+        }
+    };
+
     const save = async () => {
         const parsed = parseInt(days, 10);
         if (isNaN(parsed) || parsed < 1 || parsed > 365) {
@@ -83,6 +119,7 @@ export function SettingsPanel({
                     retentionDays: parsed,
                     emailRecipients: emails,
                     paperlessInstances: instances,
+                    odoo,
                 }),
             });
             if (!response.ok) {
@@ -90,6 +127,7 @@ export function SettingsPanel({
             }
             const saved = (await response.json()) as Settings;
             onSaved(saved);
+            setOdoo({ ...emptyOdoo, ...(saved.odoo ?? {}), apiKey: "" });
             setStatus("saved");
         } catch (error) {
             console.error("Error saving settings:", error);
@@ -289,6 +327,78 @@ export function SettingsPanel({
                         </button>
                     </div>
                 </div>
+            </div>
+
+            <div className="settings-section">
+                <p>Odoo (archives scans for one company):</p>
+                <div className="settings-row">
+                    <input
+                        type="text"
+                        placeholder="odoo.example.com"
+                        value={odoo.url}
+                        onChange={(e) => updateOdoo({ url: e.target.value })}
+                    />
+                    <input
+                        type="text"
+                        placeholder="Database (optional)"
+                        value={odoo.database}
+                        onChange={(e) =>
+                            updateOdoo({ database: e.target.value })
+                        }
+                    />
+                </div>
+                <div className="settings-row">
+                    <input
+                        type="password"
+                        placeholder={
+                            odoo.hasApiKey
+                                ? "API key (set — blank keeps it)"
+                                : "API key of the scanner agent"
+                        }
+                        autoComplete="new-password"
+                        value={odoo.apiKey}
+                        onChange={(e) => updateOdoo({ apiKey: e.target.value })}
+                    />
+                    <select
+                        value={odoo.confidentiality || "internal"}
+                        onChange={(e) =>
+                            updateOdoo({ confidentiality: e.target.value })
+                        }
+                    >
+                        <option value="internal">Internal</option>
+                        <option value="accounting">Accounting</option>
+                        <option value="private">Private</option>
+                    </select>
+                </div>
+                {odoo.companies.map((company) => (
+                    <div className="settings-instance" key={company.id}>
+                        <span>
+                            {company.name} (id {company.id})
+                        </span>
+                        <button
+                            type="button"
+                            onClick={() =>
+                                updateOdoo({
+                                    companies: odoo.companies.filter(
+                                        (c) => c.id !== company.id
+                                    ),
+                                })
+                            }
+                        >
+                            Remove
+                        </button>
+                    </div>
+                ))}
+                <div className="settings-row">
+                    <button
+                        type="button"
+                        onClick={loadOdooCompanies}
+                        disabled={!settings?.odoo?.url || !settings?.odoo?.hasApiKey}
+                    >
+                        Load companies from Odoo
+                    </button>
+                </div>
+                {odooLoad && <p className="settings-hint">{odooLoad}</p>}
             </div>
 
             <div className="settings-row">

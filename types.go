@@ -18,6 +18,7 @@ type ScanRequest struct {
 	Session            string   `json:"session"`
 	Recipients         []string `json:"recipients"`
 	PaperlessInstances []string `json:"paperlessInstances"`
+	OdooCompanies      []int    `json:"odooCompanies"`
 }
 
 type ScanResult struct {

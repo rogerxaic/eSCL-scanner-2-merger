@@ -1,21 +1,42 @@
 import React, { useEffect, useState } from "react";
+import { OdooCompany } from "../types";
 import "./ScanOptions.css";
 
 interface ScanOptionsProps {
     availableInstances: string[];
+    availableOdooCompanies: OdooCompany[];
     defaultRecipients: string[];
     onPaperlessInstancesChange: (paperlessInstances: string[]) => void;
+    onOdooCompaniesChange: (companies: number[]) => void;
     onEmailsChange: (emails: string[]) => void;
 }
 
 export function ScanOptions({
     availableInstances,
+    availableOdooCompanies,
     defaultRecipients,
     onPaperlessInstancesChange,
+    onOdooCompaniesChange,
     onEmailsChange,
 }: ScanOptionsProps): React.ReactElement {
     const [emails, setEmails] = useState<string[]>([]);
     const [paperlessInstances, setPaperlessInstances] = useState<string[]>([]);
+    const [odooCompanies, setOdooCompanies] = useState<number[]>([]);
+
+    useEffect(() => {
+        onOdooCompaniesChange(odooCompanies);
+    }, [odooCompanies, onOdooCompaniesChange]);
+
+    useEffect(() => {
+        // Keep the same array when nothing is dropped, so the parent is not
+        // updated on every render.
+        setOdooCompanies((prev) => {
+            const kept = prev.filter((id) =>
+                availableOdooCompanies.some((c) => c.id === id)
+            );
+            return kept.length === prev.length ? prev : kept;
+        });
+    }, [availableOdooCompanies]);
 
     useEffect(() => {
         onEmailsChange(emails);
@@ -61,6 +82,24 @@ export function ScanOptions({
                         }
                     />
                     {instance}
+                </label>
+            ))}
+            {availableOdooCompanies.map((company) => (
+                <label key={`odoo-${company.id}`}>
+                    <input
+                        type="checkbox"
+                        checked={odooCompanies.includes(company.id)}
+                        onChange={(e) =>
+                            setOdooCompanies(
+                                e.target.checked
+                                    ? [...odooCompanies, company.id]
+                                    : odooCompanies.filter(
+                                          (id) => id !== company.id
+                                      )
+                            )
+                        }
+                    />
+                    Odoo · {company.name}
                 </label>
             ))}
             {defaultRecipients.map((recipient) => (

@@ -114,6 +114,7 @@ func setupRoutes(r *gin.Engine, cfg *Config, pdfManager *PDFManager) {
 		api.GET("/scan-request", handleGetScanRequest)
 		api.GET("/settings", handleGetSettings)
 		api.PATCH("/settings", handlePatchSettings)
+		api.GET("/odoo/companies", handleOdooCompanies)
 		api.GET("/ws", handleWebSocket)
 	}
 
@@ -201,6 +202,7 @@ func handleSend(cfg *Config) gin.HandlerFunc {
 		var body struct {
 			Recipients         []string `json:"recipients"`
 			PaperlessInstances []string `json:"paperlessInstances"`
+			OdooCompanies      []int    `json:"odooCompanies"`
 			Sessions           []string `json:"sessions"`
 		}
 		if err := c.ShouldBindJSON(&body); err != nil {
@@ -212,8 +214,8 @@ func handleSend(cfg *Config) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "No sessions provided"})
 			return
 		}
-		if len(body.Recipients) == 0 && len(body.PaperlessInstances) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "No recipients or paperless instances provided"})
+		if len(body.Recipients) == 0 && len(body.PaperlessInstances) == 0 && len(body.OdooCompanies) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "No recipients, paperless instances or Odoo companies provided"})
 			return
 		}
 		for _, session := range body.Sessions {
@@ -227,6 +229,10 @@ func handleSend(cfg *Config) gin.HandlerFunc {
 				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Unknown paperless instance: %s", instance)})
 				return
 			}
+		}
+		if err := checkOdooCompanies(body.OdooCompanies); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
 		}
 
 		failed := map[string][]string{}
@@ -243,6 +249,13 @@ func handleSend(cfg *Config) gin.HandlerFunc {
 				if err := PostToPaperless(instance, file); err != nil {
 					log.Printf("paperless upload of %s to %s failed: %v", session, instance, err)
 					failed[session] = append(failed[session], instance)
+					reasons = append(reasons, err.Error())
+				}
+			}
+			for _, company := range body.OdooCompanies {
+				if err := PostToOdoo(company, file); err != nil {
+					log.Printf("odoo upload of %s to company %d failed: %v", session, company, err)
+					failed[session] = append(failed[session], fmt.Sprintf("odoo:%d", company))
 					reasons = append(reasons, err.Error())
 				}
 			}
@@ -463,6 +476,7 @@ func handlePatchSettings(c *gin.Context) {
 		RetentionDays      *int                 `json:"retentionDays"`
 		EmailRecipients    *[]string            `json:"emailRecipients"`
 		PaperlessInstances *[]PaperlessInstance `json:"paperlessInstances"`
+		Odoo               *OdooConfig          `json:"odoo"`
 	}
 	if err := c.ShouldBindJSON(&updates); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -472,11 +486,38 @@ func handlePatchSettings(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "retentionDays must be between 1 and 365"})
 		return
 	}
-	if err := UpdateSettings(updates.RetentionDays, updates.EmailRecipients, updates.PaperlessInstances); err != nil {
+	if updates.Odoo != nil {
+		switch updates.Odoo.Confidentiality {
+		case "", "internal", "accounting", "private":
+		default:
+			c.JSON(http.StatusBadRequest, gin.H{"error": "odoo confidentiality must be internal, accounting or private"})
+			return
+		}
+	}
+	if err := UpdateSettings(updates.RetentionDays, updates.EmailRecipients, updates.PaperlessInstances, updates.Odoo); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, CurrentSettingsRedacted())
+}
+
+// handleOdooCompanies lists the companies the stored API key may use.
+func handleOdooCompanies(c *gin.Context) {
+	companies, err := FetchOdooCompanies()
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, companies)
+}
+
+func checkOdooCompanies(companies []int) error {
+	for _, company := range companies {
+		if !IsConfiguredOdooCompany(company) {
+			return fmt.Errorf("unknown Odoo company: %d", company)
+		}
+	}
+	return nil
 }
 
 func handlePing(c *gin.Context) {
@@ -516,6 +557,11 @@ func handleScan(cfg *Config) gin.HandlerFunc {
 				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Unknown paperless instance: %s", instance)})
 				return
 			}
+		}
+
+		if err := checkOdooCompanies(req.OdooCompanies); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
 		}
 
 		settings := GetSettings(inputSource)
@@ -559,6 +605,15 @@ func handleScan(cfg *Config) gin.HandlerFunc {
 					paperlessStatus = "success"
 				}
 			}
+			odooStatus := "not requested"
+			for _, company := range req.OdooCompanies {
+				if err := PostToOdoo(company, file); err != nil {
+					log.Printf("odoo upload of %s to company %d failed: %v", session, company, err)
+					odooStatus = "error"
+				} else if odooStatus != "error" {
+					odooStatus = "success"
+				}
+			}
 			scheme := "http"
 			if c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https" {
 				scheme = "https"
@@ -567,6 +622,7 @@ func handleScan(cfg *Config) gin.HandlerFunc {
 				"link":            fmt.Sprintf("%s://%s/api/scanned/%s/scanned.pdf", scheme, c.Request.Host, session),
 				"emailStatus":     emailStatus,
 				"paperlessStatus": paperlessStatus,
+				"odooStatus":      odooStatus,
 			})
 		}
 	}
@@ -645,6 +701,7 @@ func handlePatchScanRequest(c *gin.Context) {
 	}
 	currentScanRequest.Duplex = updates.Duplex
 	currentScanRequest.PaperlessInstances = updates.PaperlessInstances
+	currentScanRequest.OdooCompanies = updates.OdooCompanies
 	response := currentScanRequest
 	stateMux.Unlock()
 
