@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { OdooConfig, PaperlessInstance, Settings } from "../types";
 
+import "./SettingsPanel.css";
+
 const emptyOdoo: OdooConfig = {
     url: "",
     database: "",
@@ -8,7 +10,6 @@ const emptyOdoo: OdooConfig = {
     confidentiality: "internal",
     companies: [],
 };
-import "./SettingsPanel.css";
 
 interface SettingsPanelProps {
     apiBaseUrl: string;
