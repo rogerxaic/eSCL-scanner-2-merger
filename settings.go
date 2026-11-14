@@ -19,10 +19,28 @@ type PaperlessInstance struct {
 	Token string `json:"token"`
 }
 
+// OdooCompany is one company the send dialog offers as an Odoo destination.
+type OdooCompany struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
+// OdooConfig is the one Odoo instance scans can be archived in. URL is the
+// host, like the paperless hosts. Confidentiality is the Odoo level given to
+// every upload ("internal" when empty).
+type OdooConfig struct {
+	URL             string        `json:"url"`
+	Database        string        `json:"database"`
+	APIKey          string        `json:"apiKey"`
+	Confidentiality string        `json:"confidentiality"`
+	Companies       []OdooCompany `json:"companies"`
+}
+
 type Settings struct {
 	RetentionDays      int                 `json:"retentionDays"`
 	EmailRecipients    []string            `json:"emailRecipients"`
 	PaperlessInstances []PaperlessInstance `json:"paperlessInstances"`
+	Odoo               OdooConfig          `json:"odoo"`
 }
 
 var (
@@ -90,7 +108,34 @@ func normalizeSettings(s Settings) Settings {
 	}
 	s.EmailRecipients = normalizeEmails(s.EmailRecipients)
 	s.PaperlessInstances = normalizeInstances(s.PaperlessInstances)
+	s.Odoo = normalizeOdoo(s.Odoo)
 	return s
+}
+
+func normalizeOdoo(o OdooConfig) OdooConfig {
+	o.URL = normalizeHost(o.URL)
+	o.Database = strings.TrimSpace(o.Database)
+	o.APIKey = strings.TrimSpace(o.APIKey)
+	o.Confidentiality = strings.TrimSpace(o.Confidentiality)
+	companies := []OdooCompany{}
+	for _, company := range o.Companies {
+		company.Name = strings.TrimSpace(company.Name)
+		if company.ID <= 0 {
+			continue
+		}
+		found := false
+		for _, existing := range companies {
+			if existing.ID == company.ID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			companies = append(companies, company)
+		}
+	}
+	o.Companies = companies
+	return o
 }
 
 func normalizeEmails(emails []string) []string {
@@ -147,6 +192,7 @@ func normalizeInstances(instances []PaperlessInstance) []PaperlessInstance {
 func copySettings(s Settings) Settings {
 	s.EmailRecipients = append([]string{}, s.EmailRecipients...)
 	s.PaperlessInstances = append([]PaperlessInstance{}, s.PaperlessInstances...)
+	s.Odoo.Companies = append([]OdooCompany{}, s.Odoo.Companies...)
 	return s
 }
 
@@ -167,10 +213,21 @@ type RedactedInstance struct {
 	HasToken    bool   `json:"hasToken"`
 }
 
+// RedactedOdoo mirrors OdooConfig for API responses, without the API key.
+type RedactedOdoo struct {
+	URL             string        `json:"url"`
+	Database        string        `json:"database"`
+	APIKey          string        `json:"apiKey"`
+	HasAPIKey       bool          `json:"hasApiKey"`
+	Confidentiality string        `json:"confidentiality"`
+	Companies       []OdooCompany `json:"companies"`
+}
+
 type RedactedSettings struct {
 	RetentionDays      int                `json:"retentionDays"`
 	EmailRecipients    []string           `json:"emailRecipients"`
 	PaperlessInstances []RedactedInstance `json:"paperlessInstances"`
+	Odoo               RedactedOdoo       `json:"odoo"`
 }
 
 // CurrentSettingsRedacted is what the API hands out: never the stored password
@@ -182,6 +239,13 @@ func CurrentSettingsRedacted() RedactedSettings {
 		RetentionDays:      current.RetentionDays,
 		EmailRecipients:    current.EmailRecipients,
 		PaperlessInstances: []RedactedInstance{},
+		Odoo: RedactedOdoo{
+			URL:             current.Odoo.URL,
+			Database:        current.Odoo.Database,
+			HasAPIKey:       odooAPIKey() != "",
+			Confidentiality: current.Odoo.Confidentiality,
+			Companies:       current.Odoo.Companies,
+		},
 	}
 	for _, instance := range current.PaperlessInstances {
 		out.PaperlessInstances = append(out.PaperlessInstances, RedactedInstance{
@@ -239,7 +303,7 @@ func saveSettings() error {
 	return os.WriteFile(settingsPath(), data, 0600)
 }
 
-func UpdateSettings(retentionDays *int, emailRecipients *[]string, paperlessInstances *[]PaperlessInstance) error {
+func UpdateSettings(retentionDays *int, emailRecipients *[]string, paperlessInstances *[]PaperlessInstance, odoo *OdooConfig) error {
 	settingsMux.Lock()
 	if retentionDays != nil {
 		appSettings.RetentionDays = *retentionDays
@@ -249,6 +313,15 @@ func UpdateSettings(retentionDays *int, emailRecipients *[]string, paperlessInst
 	}
 	if paperlessInstances != nil {
 		appSettings.PaperlessInstances = mergeInstanceSecrets(*paperlessInstances)
+	}
+	if odoo != nil {
+		// A blank key keeps the stored one, like the paperless secrets. The
+		// key is cleared by removing the URL.
+		incoming := *odoo
+		if incoming.APIKey == "" && strings.TrimSpace(incoming.URL) != "" {
+			incoming.APIKey = appSettings.Odoo.APIKey
+		}
+		appSettings.Odoo = incoming
 	}
 	appSettings = normalizeSettings(appSettings)
 	settingsMux.Unlock()

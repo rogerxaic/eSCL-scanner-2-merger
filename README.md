@@ -90,6 +90,8 @@ Open the **⚙️** button in the UI:
 - **Paperless instances** — host + credentials per instance. Accounts with
   **MFA enabled must use an API token** (paperless-ngx → profile → API auth
   token) instead of a password; paperless rejects basic auth for them.
+- **Odoo** — host, API key, and the companies the send dialog offers. See
+  [Sending to Odoo](#sending-to-odoo).
 
 ## Command-line flags
 
@@ -107,6 +109,7 @@ Open the **⚙️** button in the UI:
 | `PAPERLESS_<HOST>_TOKEN` | Fallback API token for a paperless instance, when not set in the UI. `<HOST>` is the hostname uppercased with dots as underscores, e.g. `PAPERLESS_PAPERS_EXAMPLE_COM_TOKEN` |
 | `PAPERLESS_<HOST>_USERNAME` / `_PASSWORD` | Fallback basic-auth credentials, same naming |
 | `PAPERLESS_USERNAME` / `PAPERLESS_PASSWORD` | Generic fallback credentials for all instances |
+| `ODOO_API_KEY` | Fallback Odoo API key, when not set in the UI |
 | `GIN_MODE` | Set to `release` outside development |
 
 Credentials entered in the settings UI take precedence over environment
@@ -165,3 +168,22 @@ The UI uses a small JSON API under `/api` (`/scan`, `/split`, `/merge`,
 `/send`, `/delete`, `/settings`, `/ws`, ...). A
 [Bruno](https://www.usebruno.com/) collection covering the main endpoints
 lives in `bruno/`.
+
+## Sending to Odoo
+
+Scans can also be archived in an Odoo whose documents are stored in
+paperless-ngx (the `usl_documents` module of the Unstatic Labs Odoo
+distribution). Each upload names one Odoo company, and Odoo does the OCR, so
+the document belongs to that company as soon as it arrives.
+
+1. In Odoo, create an Agent (user menu → **My Agents**) for the scanner. Give
+   it the companies it may archive for, and write access to **Documents** only.
+2. Create a key for the Agent and copy it.
+3. In the scanner's **⚙️** view, enter the Odoo host and the key, choose the
+   confidentiality, and save.
+4. Press **Load companies from Odoo**, remove the companies you do not want
+   offered, and save again.
+
+The send dialog then shows one **Odoo · <company>** checkbox per company. The
+scanner calls `usl.document.upload_from_odoo` through the JSON-2 API and does
+not wait for the OCR.
