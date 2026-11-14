@@ -69,7 +69,9 @@ jobs:
 
       # The compose file in nomad_gitops pins tag AND digest. Nothing else
       # moves that pin, so without the steps below a build reaches the
-      # registry and stops there.
+      # registry and stops there. The push of the pin to nomad_gitops main
+      # is the deploy: its webhook runs the Komodo procedure
+      # personal-reconcile, which deploys every stack whose files changed.
 
       - name: Check out gitops
         if: github.event_name == 'push'
@@ -112,52 +114,3 @@ jobs:
             git commit -m "scanner: ${GITHUB_SHA:0:7}"
             git push origin main
           fi
-
-      # The Komodo core binds port 9120 on the tailnet only, so the runner has
-      # to join it. `tag:ci` is granted that port in the policy file. The
-      # address is the KOMODO_URL repository variable, not a constant here:
-      # the core moved once already, on 2026-08-15.
-
-      - name: Join the tailnet
-        if: github.event_name == 'push'
-        uses: tailscale/github-action@v4
-        with:
-          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
-          tags: tag:ci
-
-      - name: Deploy
-        if: github.event_name == 'push'
-        env:
-          KEY: ${{ secrets.KOMODO_KEY }}
-          SECRET: ${{ secrets.KOMODO_SECRET }}
-          # Set the KOMODO_URL repository variable when the core moves. The
-          # literal below is only the fallback if that variable is unset.
-          KOMODO_URL: ${{ vars.KOMODO_URL || 'http://100.115.184.114:9120' }}
-          KOMODO_URL_IS_SET: ${{ vars.KOMODO_URL != '' }}
-        run: |
-          set -euo pipefail
-          if [ "$KOMODO_URL_IS_SET" = "true" ]; then
-            echo "Komodo core $KOMODO_URL (from the KOMODO_URL variable)"
-          else
-            echo "::warning::KOMODO_URL is unset. The job uses the built-in default $KOMODO_URL, which goes stale when the core moves."
-          fi
-
-          curl -sS --fail-with-body --max-time 600 \
-            -X POST "$KOMODO_URL/execute" \
-            -H "X-Api-Key: $KEY" -H "X-Api-Secret: $SECRET" \
-            -H "Content-Type: application/json" \
-            -d '{"type":"DeployStack","params":{"stack":"cat_xaic_nice_scanner"}}' \
-            > update.json
-
-          # Komodo answers 200 with the update record even when the deploy
-          # itself failed, so the job has to read `success` and exit on it.
-          python3 - update.json <<'PY'
-          import json, sys
-          u = json.load(open(sys.argv[1]))
-          print(u.get("operation"), u.get("status"), "success:", u.get("success"))
-          for log in u.get("logs", []):
-              print("---", log.get("stage"))
-              print((log.get("stderr") or log.get("stdout") or "").strip()[:2000])
-          sys.exit(0 if u.get("success") else 1)
-          PY
